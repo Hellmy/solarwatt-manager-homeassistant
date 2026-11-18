@@ -481,7 +481,7 @@ class KiwiGridHEMSClient:
         method: str,
         path: str,
         *,
-        payload: dict[str, Any] | None = None,
+        payload: Any = None,
         where: str,
     ) -> None:
         await self._async_ensure_access_token()
@@ -659,6 +659,30 @@ class KiwiGridHEMSClient:
             if "does not have override info" not in str(err):
                 raise
             _LOGGER.debug("No active KiwiGrid HEMS override to end")
+
+    async def async_get_device_schedule(self, device_id: str) -> Any:
+        """Fetch a KiwiGrid HEMS device schedule."""
+        safe_device_id = quote(str(device_id or "").strip(), safe="")
+        if not safe_device_id:
+            raise KiwiGridHEMSProtocolError("KiwiGrid HEMS device id is missing")
+        return await self._async_get_json(
+            f"/device/{safe_device_id}/schedule",
+            where="GET /v12/device/{id}/schedule",
+        )
+
+    async def async_set_device_schedule(self, device_id: str, schedule: Any) -> None:
+        """Replace a KiwiGrid HEMS device schedule."""
+        safe_device_id = quote(str(device_id or "").strip(), safe="")
+        if not safe_device_id:
+            raise KiwiGridHEMSProtocolError("KiwiGrid HEMS device id is missing")
+        if not isinstance(schedule, (dict, list)):
+            raise KiwiGridHEMSProtocolError("Schedule must be a JSON object or array")
+        await self._async_send_json(
+            "PUT",
+            f"/device/{safe_device_id}/schedule",
+            payload=schedule,
+            where="PUT /v12/device/{id}/schedule",
+        )
 
     # /v12/plug ------------------------------------------------------------
     async def async_get_plugs(self) -> list[dict[str, Any]]:

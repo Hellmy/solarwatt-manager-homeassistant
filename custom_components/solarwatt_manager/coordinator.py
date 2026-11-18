@@ -59,6 +59,7 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
         self.local_last_error: str | None = None
         self._hems_items_cache: list[dict[str, Any]] = []
         self._hems_energy_flow_cache: list[dict[str, Any]] = []
+        self.hems_schedules: dict[str, Any] = {}
         self._hems_items_error: SolarwattError | None = None
         self._hems_energy_flow_error: SolarwattError | None = None
         self._hems_last_attempt: float | None = None
@@ -278,6 +279,7 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
         """Clear HEMS cache and availability state when the source is disabled."""
         self._hems_items_cache = []
         self._hems_energy_flow_cache = []
+        self.hems_schedules = {}
         self._hems_items_error = None
         self._hems_energy_flow_error = None
         self._hems_last_attempt = None
@@ -504,6 +506,37 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
         await self.async_refresh_things()
         self.async_update_listeners()
         await self.async_request_refresh()
+
+    async def async_get_hems_device_schedule(self, device_id: str) -> Any:
+        """Fetch and publish the current schedule for a KiwiGrid device."""
+        enabled, username, password = self._hems_credentials()
+        if not enabled or not (username and password):
+            raise SolarwattError("KiwiGrid HEMS is not configured")
+        schedule = await self.client.async_get_hems_device_schedule(
+            device_id,
+            username=username,
+            password=password,
+        )
+        self.hems_schedules[device_id] = schedule
+        self.async_update_listeners()
+        return schedule
+
+    async def async_set_hems_device_schedule(
+        self,
+        device_id: str,
+        schedule: Any,
+    ) -> Any:
+        """Replace a device schedule and refresh the published server value."""
+        enabled, username, password = self._hems_credentials()
+        if not enabled or not (username and password):
+            raise SolarwattError("KiwiGrid HEMS is not configured")
+        await self.client.async_set_hems_device_schedule(
+            device_id,
+            schedule,
+            username=username,
+            password=password,
+        )
+        return await self.async_get_hems_device_schedule(device_id)
 
     async def async_set_hems_device_optimization_state(
         self,

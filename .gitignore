@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 __MACOSX/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .idea/
 json/

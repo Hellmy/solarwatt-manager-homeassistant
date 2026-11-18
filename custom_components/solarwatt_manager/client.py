@@ -1137,6 +1137,44 @@ class SOLARWATTClient:
         """Fetch local thing metadata from the HEMS configurator endpoint."""
         return await self.async_get_hems_configurator_things()
 
+    async def async_get_hems_device_schedule(
+        self,
+        device_id: str,
+        *,
+        username: str = "",
+        password: str = "",
+    ) -> Any:
+        """Fetch one KiwiGrid HEMS device schedule."""
+        hems = self._get_hems_client(username, password)
+        if not hems.enabled:
+            raise SolarwattAuthError("KiwiGrid HEMS credentials are missing")
+        try:
+            return await hems.async_get_device_schedule(device_id)
+        except KiwiGridHEMSAuthError as err:
+            raise SolarwattAuthError(f"KiwiGrid HEMS authentication failed: {err}") from err
+        except KiwiGridHEMSError as err:
+            raise SolarwattConnectionError(f"KiwiGrid HEMS schedule fetch failed: {err}") from err
+
+    async def async_set_hems_device_schedule(
+        self,
+        device_id: str,
+        schedule: Any,
+        *,
+        username: str = "",
+        password: str = "",
+    ) -> None:
+        """Replace one KiwiGrid HEMS device schedule."""
+        hems = self._get_hems_client(username, password)
+        if not hems.enabled:
+            raise SolarwattAuthError("KiwiGrid HEMS credentials are missing")
+        try:
+            async with self._hems_config_lock:
+                await hems.async_set_device_schedule(device_id, schedule)
+        except KiwiGridHEMSAuthError as err:
+            raise SolarwattAuthError(f"KiwiGrid HEMS authentication failed: {err}") from err
+        except KiwiGridHEMSError as err:
+            raise SolarwattConnectionError(f"KiwiGrid HEMS schedule update failed: {err}") from err
+
 
 def _hems_year_payload_key_for_item(item_name: str) -> str:
     name = str(item_name or "").strip().lower()

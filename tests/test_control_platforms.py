@@ -91,9 +91,14 @@ def _setup(platform, things, options=None, entry_id="entry"):
         async_clear_hems_device_optimization_state=AsyncMock(),
         async_reset_hems_device_optimization_config=AsyncMock(),
         async_update_hems_device_optimization_config=AsyncMock(),
+        async_update_hems_battery_backup_state_of_charge=AsyncMock(),
+        hems_backup_state_of_charge={},
         async_get_hems_device_schedule=AsyncMock(),
         async_set_hems_device_schedule=AsyncMock(),
         hems_schedules={},
+        data={},
+        item_to_thing_uid={},
+        async_update_listeners=lambda: None,
     )
     entry.runtime_data = coordinator
     batches = []
@@ -293,6 +298,67 @@ def test_battery_schedule_set_button_requires_prior_get(platforms):
     with pytest.raises(RuntimeError, match="Get the schedule before sending it"):
         asyncio.run(button.async_press())
     rig.coordinator.async_set_hems_device_schedule.assert_not_awaited()
+
+
+def test_battery_backup_state_of_charge_number_sends_on_commit(platforms):
+    from types import SimpleNamespace
+
+    battery = _thing("battery", kiwigridKind="battery", identifier="battery-id")
+    rig = _setup(platforms.number, {"battery": battery})
+    item_name = "hems_battery_battery_backup_state_of_charge"
+    rig.coordinator.item_to_thing_uid[item_name] = "battery"
+    rig.coordinator.data[item_name] = SimpleNamespace(parsed=SimpleNamespace(value=15))
+    rig.coordinator.async_update_hems_battery_backup_state_of_charge = AsyncMock(
+        side_effect=lambda device_id, value, **kwargs: rig.coordinator.hems_backup_state_of_charge.update(
+            {device_id: value}
+        )
+    )
+    number = next(entity for batch in rig.batches for entity in batch)
+    number.entity_id = "number.backup_reserve"
+    number.name = "Backup reserve"
+
+    assert number.native_value == 15
+    assert number._attr_native_min_value == 0
+    assert number._attr_native_unit_of_measurement == "%"
+    assert number._attr_native_step == 5
+    asyncio.run(number.async_set_native_value(20))
+    assert number.native_value == 20
+    rig.coordinator.async_update_hems_battery_backup_state_of_charge.assert_awaited_once_with(
+        "battery-id", 20, entity_id="number.backup_reserve", entity_name="Backup reserve",
+    )
+    expected_ids = platforms.entity_helpers._selected_entity_unique_ids(
+        rig.entry, {}, {}, {"battery"}, rig.coordinator.things,
+    )
+    assert number._attr_unique_id in expected_ids
+
+
+@pytest.mark.parametrize("value", [-0.1, 100.1, float("nan"), float("inf"), True])
+def test_backup_state_of_charge_number_rejects_invalid_values(platforms, value):
+    battery = _thing("battery", kiwigridKind="battery", identifier="battery-id")
+    rig = _setup(platforms.number, {"battery": battery})
+    number = rig.batches[0][0]
+
+    with pytest.raises(RuntimeError, match="between 0 and 100"):
+        asyncio.run(number.async_set_native_value(value))
+    rig.coordinator.async_update_hems_battery_backup_state_of_charge.assert_not_awaited()
+
+
+def test_backup_state_of_charge_number_allows_value_below_battery_minimum(platforms):
+    from types import SimpleNamespace
+
+    battery = _thing("battery", kiwigridKind="battery", identifier="battery-id")
+    rig = _setup(platforms.number, {"battery": battery})
+    minimum_item_name = "hems_battery_battery_state_of_charge_minimum"
+    rig.coordinator.item_to_thing_uid[minimum_item_name] = "battery"
+    rig.coordinator.data[minimum_item_name] = SimpleNamespace(parsed=SimpleNamespace(value=10))
+    number = rig.batches[0][0]
+    number.entity_id = "number.backup_reserve"
+    number.name = "Backup reserve"
+
+    asyncio.run(number.async_set_native_value(5))
+    rig.coordinator.async_update_hems_battery_backup_state_of_charge.assert_awaited_once_with(
+        "battery-id", 5, entity_id="number.backup_reserve", entity_name="Backup reserve",
+    )
 
 
 

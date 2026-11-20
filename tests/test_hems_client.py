@@ -1826,6 +1826,23 @@ def test_config_update_only_patches_config_and_never_schedules():
     assert calls == [("PATCH", "/device/device%2Fid/optimization/config", config)]
 
 
+def test_battery_backup_state_of_charge_patches_fraction_to_battery_endpoint(caplog):
+    caplog.set_level("DEBUG", logger=hems_client._LOGGER.name)
+    calls = []
+
+    class FakeClient(KiwiGridHEMSClient):
+        async def _async_send_json(self, method, path, *, payload=None, where):
+            calls.append((method, path, payload))
+
+    asyncio.run(
+        FakeClient(session=None).async_set_battery_backup_state_of_charge(
+            "device/id", 0.15,
+        )
+    )
+    assert calls == [("PATCH", "/battery/device%2Fid", {"backup_state_of_charge": 0.15})]
+    assert 'PATCH /battery/device%2Fid with JSON: {"backup_state_of_charge":0.15}' in caplog.text
+
+
 def test_device_schedule_put_returns_http_status_and_response_body():
     class FakeResponse:
         status = 200

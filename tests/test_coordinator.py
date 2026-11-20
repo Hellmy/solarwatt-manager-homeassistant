@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 import logging
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -48,6 +49,7 @@ def _load_coordinator_module():
         category: str | None
 
     constants = {
+        "DOMAIN": "solarwatt_manager",
         "OPTIMIZATION_CONFIG_FIELDS": ("lowest_power", "max_power", "min_runtime", "min_resttime", "must_runtime", "target_time.capacity", "target_time.target_time"),
         "CONF_KIWIGRID_OVERRIDE_DURATION": "kiwigrid_override_duration",
         "CONF_KIWIGRID_HEMS_SCAN_INTERVAL": "kiwigrid_hems_scan_interval",
@@ -71,6 +73,11 @@ def _load_coordinator_module():
         package_name=package_name,
         stubs={
             "homeassistant": make_module("homeassistant"),
+            "homeassistant.components": make_module("homeassistant.components"),
+            "homeassistant.components.logbook": make_module(
+                "homeassistant.components.logbook",
+                async_log_entry=Mock(),
+            ),
             "homeassistant.core": make_module(
                 "homeassistant.core",
                 HomeAssistant=object,
@@ -126,6 +133,7 @@ def _load_coordinator_module():
 coordinator_module, SolarwattError, SolarwattAuthError, ConfigEntryAuthFailed = (
     _load_coordinator_module()
 )
+coordinator_module.async_log_entry = Mock()
 
 
 class FakeEntry:
@@ -551,6 +559,77 @@ def test_config_update_refreshes_device_metadata():
     )
     coordinator.async_refresh_things.assert_awaited_once()
     coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_battery_backup_state_of_charge_converts_percent_to_fraction(monkeypatch):
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+
+    coordinator, _, client = _coordinator()
+    coordinator.hass = SimpleNamespace(async_create_task=asyncio.create_task)
+    client.async_set_hems_battery_backup_state_of_charge = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+    monkeypatch.setattr(coordinator_module, "BACKUP_STATE_OF_CHARGE_UPDATE_DELAY", 0)
+    coordinator_module.async_log_entry.reset_mock()
+
+    async def run_update():
+        await coordinator.async_update_hems_battery_backup_state_of_charge(
+            "battery-id", 15,
+            entity_id="number.backup_reserve",
+            entity_name="Backup reserve",
+        )
+        await coordinator._hems_backup_state_of_charge_tasks["battery-id"]
+
+    asyncio.run(run_update())
+
+    client.async_set_hems_battery_backup_state_of_charge.assert_awaited_once_with(
+        "battery-id", 0.15, username="cloud-user", password="cloud-password",
+    )
+    coordinator_module.async_log_entry.assert_called_once_with(
+        coordinator.hass, "Backup reserve", "15%", domain="solarwatt_manager",
+        entity_id="number.backup_reserve",
+    )
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_battery_backup_state_of_charge_debounces_to_last_value(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    coordinator, _, client = _coordinator()
+    coordinator.hass = SimpleNamespace(async_create_task=asyncio.create_task)
+    client.async_set_hems_battery_backup_state_of_charge = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+    monkeypatch.setattr(coordinator_module, "BACKUP_STATE_OF_CHARGE_UPDATE_DELAY", 0.05)
+
+    async def run_updates():
+        await coordinator.async_update_hems_battery_backup_state_of_charge("battery-id", 15)
+        await asyncio.sleep(0.03)
+        await coordinator.async_update_hems_battery_backup_state_of_charge("battery-id", 25)
+        await asyncio.sleep(0.03)
+        client.async_set_hems_battery_backup_state_of_charge.assert_not_awaited()
+        await coordinator._hems_backup_state_of_charge_tasks["battery-id"]
+
+    asyncio.run(run_updates())
+
+    client.async_set_hems_battery_backup_state_of_charge.assert_awaited_once_with(
+        "battery-id", 0.25, username="cloud-user", password="cloud-password",
+    )
+    assert coordinator.hems_backup_state_of_charge == {}
+
+
+@pytest.mark.parametrize("value", [-0.1, 100.1, float("nan"), float("inf"), True])
+def test_battery_backup_state_of_charge_rejects_invalid_values(value):
+    from unittest.mock import AsyncMock
+
+    coordinator, _, client = _coordinator()
+    client.async_set_hems_battery_backup_state_of_charge = AsyncMock()
+
+    with pytest.raises(coordinator_module.SolarwattError, match="between 0 and 100"):
+        asyncio.run(
+            coordinator.async_update_hems_battery_backup_state_of_charge("battery-id", value)
+        )
+    client.async_set_hems_battery_backup_state_of_charge.assert_not_awaited()
 
 
 @pytest.mark.parametrize("readback_matches", [True, False])

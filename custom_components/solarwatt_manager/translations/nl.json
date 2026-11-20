@@ -188,6 +188,9 @@
   },
   "entity": {
     "number": {
+      "backup_state_of_charge": {
+        "name": "Noodreserve"
+      },
       "lowest_power": {
         "name": "Schakeldrempel"
       },

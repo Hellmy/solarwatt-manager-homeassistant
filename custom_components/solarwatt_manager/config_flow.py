@@ -11,6 +11,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
+from homeassistant.helpers import selector
 from .const import (
     CONF_ENABLED_THINGS,
     CONF_ENERGY_DELTA_KWH,
@@ -55,7 +56,11 @@ from .client import (
     SolarwattNotManagerError,
     SolarwattProtocolError,
 )
-from .entity_helpers import sync_selected_thing_entities
+from .entity_helpers import (
+    get_hems_device_id,
+    is_hems_battery_thing,
+    sync_selected_thing_entities,
+)
 from .hems_api import is_energy_overview_thing, is_hems_thing, is_kiwigrid_flow_thing
 from .thing_matching import (
     is_local_bridge_thing as _is_bridge_type,
@@ -68,6 +73,8 @@ _DEVICE_SELECTION_SECTION = "device_selection"
 _LOCAL_CONNECTION_SECTION = "local_connection"
 _KIWIGRID_CONNECTION_SECTION = "kiwigrid_connection"
 _GENERAL_SETTINGS_SECTION = "general_settings"
+_SCHEDULE_EDITOR_DEVICE_KEY = "_schedule_editor_device"
+_SCHEDULE_EDITOR_VALUE_KEY = "schedule"
 _FORM_SECTIONS = (
     _LOCAL_CONNECTION_SECTION,
     _KIWIGRID_CONNECTION_SECTION,
@@ -1131,12 +1138,36 @@ class SOLARWATTItemsOptionsFlow(config_entries.OptionsFlow):
         # expected by the base class so this works across HA versions.
         self._config_entry = config_entry
         self._device_fields: dict[str, str] = {}
+        self._schedule_editor_device_id: str | None = None
+        self._schedule_editor_options: dict[str, Any] | None = None
 
     async def async_step_init(
         self,
         user_input: Mapping[str, Any] | None = None,
     ) -> Any:
         if user_input is not None:
+            if device_id := user_input.get(_SCHEDULE_EDITOR_DEVICE_KEY):
+                coordinator = getattr(self.config_entry, "runtime_data", None)
+                if coordinator is None:
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=self._build_options_schema(user_input),
+                        errors={"base": "schedule_unavailable"},
+                    )
+                self._schedule_editor_device_id = str(device_id)
+                self._schedule_editor_options = self._build_options_data(user_input)
+                try:
+                    schedule = await coordinator.async_get_hems_device_schedule(
+                        self._schedule_editor_device_id
+                    )
+                except Exception:
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=self._build_options_schema(user_input),
+                        errors={"base": "schedule_load_failed"},
+                    )
+                return await self.async_step_schedule_edit(schedule=schedule)
+
             entry_data = _normalize_options_entry_data(user_input, self.config_entry.data)
             data = self._build_options_data(user_input)
             _clear_unused_default_local_connection(entry_data, data)
@@ -1202,6 +1233,51 @@ class SOLARWATTItemsOptionsFlow(config_entries.OptionsFlow):
             description_placeholders=_connection_description_placeholders(),
         )
 
+    async def async_step_schedule_edit(
+        self,
+        user_input: Mapping[str, Any] | None = None,
+        *,
+        schedule: Any = None,
+    ) -> Any:
+        """Edit the GET-loaded Battery schedule and send it with PUT."""
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is None or self._schedule_editor_device_id is None:
+            return self.async_abort(reason="schedule_unavailable")
+        if user_input is not None:
+            try:
+                await coordinator.async_set_hems_device_schedule(
+                    self._schedule_editor_device_id,
+                    user_input[_SCHEDULE_EDITOR_VALUE_KEY],
+                )
+            except Exception:
+                return self.async_show_form(
+                    step_id="schedule_edit",
+                    data_schema=self._schedule_editor_schema(
+                        user_input[_SCHEDULE_EDITOR_VALUE_KEY]
+                    ),
+                    errors={"base": "schedule_update_failed"},
+                )
+            return self.async_create_entry(
+                title="",
+                data=self._schedule_editor_options or dict(self.config_entry.options),
+            )
+        if schedule is None:
+            schedule = coordinator.hems_schedules.get(self._schedule_editor_device_id)
+        if schedule is None:
+            return self.async_abort(reason="schedule_unavailable")
+        return self.async_show_form(
+            step_id="schedule_edit",
+            data_schema=self._schedule_editor_schema(schedule),
+        )
+
+    @staticmethod
+    def _schedule_editor_schema(schedule: Any) -> vol.Schema:
+        return vol.Schema(
+            {
+                vol.Required(_SCHEDULE_EDITOR_VALUE_KEY, default=schedule): selector.ObjectSelector({}),
+            }
+        )
+
     def _build_options_schema(
         self, user_input: Mapping[str, Any] | None = None
     ) -> vol.Schema:
@@ -1233,8 +1309,41 @@ class SOLARWATTItemsOptionsFlow(config_entries.OptionsFlow):
                 include_settings=True,
             ),
         }
+        battery_options = self._schedule_editor_options_for(values)
+        if battery_options:
+            schema[vol.Optional(_SCHEDULE_EDITOR_DEVICE_KEY)] = selector.SelectSelector(
+                {
+                    "options": battery_options,
+                    "mode": selector.SelectSelectorMode.DROPDOWN,
+                }
+            )
 
         return vol.Schema(schema)
+
+    def _schedule_editor_options_for(
+        self,
+        values: Mapping[str, Any],
+    ) -> list[dict[str, str]]:
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is None:
+            return []
+        selected = get_selected_thing_uids(values)
+        options: list[dict[str, str]] = []
+        for thing_uid, thing in (coordinator.things or {}).items():
+            if (
+                not is_hems_battery_thing(thing)
+                or (selected is not None and thing_uid not in selected)
+            ):
+                continue
+            device_id = get_hems_device_id(thing, thing_uid)
+            if device_id:
+                options.append(
+                    {
+                        "value": device_id,
+                        "label": get_thing_display_name(thing, thing_uid) or thing_uid,
+                    }
+                )
+        return options
 
     def _build_options_data(self, user_input: Mapping[str, Any]) -> dict[str, Any]:
         """Merge, normalize, and return user-visible options."""

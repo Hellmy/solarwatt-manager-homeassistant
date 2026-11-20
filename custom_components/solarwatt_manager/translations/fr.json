@@ -18,7 +18,10 @@
       "cannot_connect": "Impossible de se connecter au SOLARWATT Manager.",
       "connection_failed": "Échec de la connexion au SOLARWATT Manager.",
       "unknown_error": "Une erreur inconnue est survenue.",
-      "missing_connection": "Configurez le gestionnaire local, KiwiGrid HEMS ou les deux."
+      "missing_connection": "Configurez le gestionnaire local, KiwiGrid HEMS ou les deux.",
+      "schedule_unavailable": "L'éditeur de programme batterie est indisponible. Rechargez l'intégration et réessayez.",
+      "schedule_load_failed": "Impossible de charger le programme actuel de la batterie.",
+      "schedule_update_failed": "Impossible d'enregistrer le programme modifié de la batterie."
     },
     "abort": {
       "reauth_successful": "L'authentification a été mise à jour avec succès.",
@@ -137,6 +140,7 @@
     "step": {
       "init": {
         "title": "Options",
+        "data": {"_schedule_editor_device": "Modifier le programme batterie"},
         "sections": {
           "device_selection": {
             "name": "Activer ou désactiver les appareils"
@@ -174,6 +178,11 @@
             }
           }
         }
+      },
+      "schedule_edit": {
+        "title": "Modifier le programme batterie",
+        "description": "Le programme actuel a été chargé depuis KiwiGrid. Modifiez le JSON puis envoyez-le.",
+        "data": {"schedule": "JSON du programme"}
       }
     }
   },

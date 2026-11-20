@@ -18,7 +18,10 @@
       "cannot_connect": "Kann keine Verbindung zum SOLARWATT Manager herstellen.",
       "connection_failed": "Verbindung zum SOLARWATT Manager fehlgeschlagen.",
       "unknown_error": "Unbekannter Fehler aufgetreten.",
-      "missing_connection": "Bitte den lokalen SOLARWATT Manager, KiwiGrid Online oder beide Datenquellen vollständig konfigurieren."
+      "missing_connection": "Bitte den lokalen SOLARWATT Manager, KiwiGrid Online oder beide Datenquellen vollständig konfigurieren.",
+      "schedule_unavailable": "Der Batterie-Zeitplan-Editor ist nicht verfügbar. Lade die Integration neu und versuche es erneut.",
+      "schedule_load_failed": "Der aktuelle Batterie-Zeitplan konnte nicht geladen werden.",
+      "schedule_update_failed": "Der bearbeitete Batterie-Zeitplan konnte nicht gespeichert werden."
     },
     "abort": {
       "reauth_successful": "Die Authentifizierung wurde erfolgreich aktualisiert.",
@@ -137,6 +140,7 @@
     "step": {
       "init": {
         "title": "Optionen",
+        "data": {"_schedule_editor_device": "Batterie-Zeitplan bearbeiten"},
         "sections": {
           "device_selection": {
             "name": "Geräte aktivieren oder deaktivieren"
@@ -174,6 +178,11 @@
             }
           }
         }
+      },
+      "schedule_edit": {
+        "title": "Batterie-Zeitplan bearbeiten",
+        "description": "Der aktuelle Zeitplan wurde von KiwiGrid geladen. Bearbeite das JSON und sende es mit dem Absenden zurück.",
+        "data": {"schedule": "Zeitplan-JSON"}
       }
     }
   },

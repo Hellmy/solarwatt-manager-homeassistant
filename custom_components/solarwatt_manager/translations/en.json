@@ -18,7 +18,10 @@
       "cannot_connect": "Unable to connect to the SOLARWATT Manager.",
       "connection_failed": "Connection to SOLARWATT Manager failed.",
       "unknown_error": "Unknown error occurred.",
-      "missing_connection": "Fully configure the local SOLARWATT Manager, KiwiGrid Online, or both data sources."
+      "missing_connection": "Fully configure the local SOLARWATT Manager, KiwiGrid Online, or both data sources.",
+      "schedule_unavailable": "The Battery schedule editor is unavailable. Reload the integration and try again.",
+      "schedule_load_failed": "Could not load the current Battery schedule.",
+      "schedule_update_failed": "Could not save the edited Battery schedule."
     },
     "abort": {
       "reauth_successful": "Authentication was updated successfully.",
@@ -137,6 +140,7 @@
     "step": {
       "init": {
         "title": "Options",
+        "data": {"_schedule_editor_device": "Edit Battery schedule"},
         "sections": {
           "device_selection": {
             "name": "Enable or disable devices"
@@ -174,6 +178,11 @@
             }
           }
         }
+      },
+      "schedule_edit": {
+        "title": "Edit Battery schedule",
+        "description": "The current schedule was loaded from KiwiGrid. Edit the JSON and submit to send it back.",
+        "data": {"schedule": "Schedule JSON"}
       }
     }
   },

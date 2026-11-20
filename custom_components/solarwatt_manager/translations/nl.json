@@ -18,7 +18,10 @@
       "cannot_connect": "Kan geen verbinding maken met de SOLARWATT Manager.",
       "connection_failed": "Verbinding met SOLARWATT Manager mislukt.",
       "unknown_error": "Er is een onbekende fout opgetreden.",
-      "missing_connection": "Configureer de lokale manager, KiwiGrid HEMS of beide."
+      "missing_connection": "Configureer de lokale manager, KiwiGrid HEMS of beide.",
+      "schedule_unavailable": "De batterijschema-editor is niet beschikbaar. Laad de integratie opnieuw en probeer het nog eens.",
+      "schedule_load_failed": "Het huidige batterijschema kon niet worden opgehaald.",
+      "schedule_update_failed": "Het aangepaste batterijschema kon niet worden opgeslagen."
     },
     "abort": {
       "reauth_successful": "De authenticatie is succesvol bijgewerkt.",
@@ -137,6 +140,7 @@
     "step": {
       "init": {
         "title": "Opties",
+        "data": {"_schedule_editor_device": "Batterijschema bewerken"},
         "sections": {
           "device_selection": {
             "name": "Apparaten in- of uitschakelen"
@@ -174,6 +178,11 @@
             }
           }
         }
+      },
+      "schedule_edit": {
+        "title": "Batterijschema bewerken",
+        "description": "Het huidige schema is opgehaald uit KiwiGrid. Bewerk de JSON en verstuur deze.",
+        "data": {"schedule": "Schema-JSON"}
       }
     }
   },

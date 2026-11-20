@@ -27,6 +27,12 @@ PACKAGE_NAME = "solarwatt_manager_options_test"
 stubs = make_homeassistant_stubs()
 stubs["homeassistant.config_entries"].ConfigFlow = _ConfigFlow
 stubs["homeassistant.config_entries"].OptionsFlow = _OptionsFlow
+stubs["homeassistant.helpers.selector"] = make_module(
+    "homeassistant.helpers.selector",
+    ObjectSelector=lambda config: (lambda value: value),
+    SelectSelector=lambda config: (lambda value: value),
+    SelectSelectorMode=SimpleNamespace(DROPDOWN="dropdown"),
+)
 stubs.update({
     "homeassistant.data_entry_flow": make_module(
         "homeassistant.data_entry_flow", section=lambda schema, options: schema,
@@ -40,7 +46,10 @@ stubs.update({
         SolarwattProtocolError=type("ProtocolError", (Exception,), {}),
     ),
     f"{PACKAGE_NAME}.entity_helpers": make_module(
-        f"{PACKAGE_NAME}.entity_helpers", sync_selected_thing_entities=lambda *args: None,
+        f"{PACKAGE_NAME}.entity_helpers",
+        get_hems_device_id=lambda thing, fallback: thing.get("properties", {}).get("identifier") or fallback,
+        is_hems_battery_thing=lambda thing: thing.get("properties", {}).get("kiwigridKind") == "battery",
+        sync_selected_thing_entities=lambda *args: None,
     ),
 })
 config_flow = load_component_module_with_stubs(
@@ -228,3 +237,80 @@ def test_sensor_names_default_to_auto_and_reject_unknown_language():
     assert flow._build_options_data({})["sensor_name_language"] == "auto"
     saved = flow._build_options_data({"sensor_name_language": "xx"})
     assert "invalid_sensor_name_language" in config_flow._validate_options_data(saved).values()
+
+
+def test_schedule_editor_loads_current_schedule_and_sends_edited_value():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    current_schedule = {
+        "thursday": [{
+            "start": "05:30",
+            "end": "06:30",
+            "mode": "BATTERY_HOLD_CURRENT_SOC",
+            "isUserSchedule": True,
+        }]
+    }
+    coordinator = SimpleNamespace(
+        things={},
+        hems_schedules={},
+        async_get_hems_device_schedule=AsyncMock(return_value=current_schedule),
+        async_set_hems_device_schedule=AsyncMock(),
+    )
+    entry = SimpleNamespace(data={}, options={}, runtime_data=coordinator)
+    flow = config_flow.SOLARWATTItemsOptionsFlow(entry)
+    flow.async_show_form = lambda **kwargs: kwargs
+    flow.async_create_entry = lambda **kwargs: kwargs
+
+    result = asyncio.run(
+        flow.async_step_init({"_schedule_editor_device": "battery-id"})
+    )
+
+    assert result["step_id"] == "schedule_edit"
+    assert result["data_schema"]({})["schedule"] == current_schedule
+    coordinator.async_get_hems_device_schedule.assert_awaited_once_with("battery-id")
+
+    edited_schedule = {
+        "thursday": [{
+            "start": "06:00",
+            "end": "07:00",
+            "mode": "BATTERY_HOLD_CURRENT_SOC",
+            "isUserSchedule": True,
+        }]
+    }
+    submitted = asyncio.run(
+        flow.async_step_schedule_edit({"schedule": edited_schedule})
+    )
+
+    coordinator.async_set_hems_device_schedule.assert_awaited_once_with(
+        "battery-id", edited_schedule
+    )
+    assert submitted["title"] == ""
+    assert isinstance(submitted["data"], dict)
+
+
+def test_schedule_editor_lists_selected_battery_devices():
+    coordinator = SimpleNamespace(
+        things={
+            "battery-uid": {
+                "UID": "battery-uid",
+                "label": "Home Battery",
+                "properties": {
+                    "kiwigridKind": "battery",
+                    "identifier": "battery-api-id",
+                },
+            },
+            "other-uid": {
+                "UID": "other-uid",
+                "label": "Other device",
+                "properties": {"kiwigridKind": "plug"},
+            },
+        }
+    )
+    flow = config_flow.SOLARWATTItemsOptionsFlow(
+        SimpleNamespace(data={}, options={"enabled_things": ["battery-uid"]}, runtime_data=coordinator)
+    )
+
+    assert flow._schedule_editor_options_for(flow.config_entry.options) == [
+        {"value": "battery-api-id", "label": "Home Battery"}
+    ]

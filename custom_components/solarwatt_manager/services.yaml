@@ -60,3 +60,18 @@ reset_stats_value:
     entity:
       domain: sensor
       integration: solarwatt_manager
+
+set_device_schedule:
+  name: Set battery schedule
+  description: Send the cached GET schedule, or replace it with an edited JSON request body.
+  target:
+    entity:
+      domain: sensor
+      integration: solarwatt_manager
+  fields:
+    schedule:
+      name: Edited schedule
+      description: Optional JSON object or array. When omitted, the most recently fetched schedule is sent.
+      required: false
+      selector:
+        object:

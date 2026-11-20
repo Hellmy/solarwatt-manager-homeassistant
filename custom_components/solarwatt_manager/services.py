@@ -12,7 +12,12 @@ import homeassistant.helpers.config_validation as cv
 
 from .client import SolarwattError
 from .const import DOMAIN
-from .sensor import STATS_TOTAL_ENTITY_MAP, SOLARWATTStatsTotalSensor
+from .sensor import (
+    HEMS_SCHEDULE_ENTITY_MAP,
+    STATS_TOTAL_ENTITY_MAP,
+    SOLARWATTScheduleSensor,
+    SOLARWATTStatsTotalSensor,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,10 +25,12 @@ SERVICE_SET_STATS_VALUE = "set_stats_value"
 SERVICE_RESET_STATS_VALUE = "reset_stats_value"
 SERVICE_CALCULATE_STATS_VALUE = "calculate_stats_value"
 SERVICE_CALCULATE_ALL_STATS_VALUES = "calculate_all_stats_values"
+SERVICE_SET_DEVICE_SCHEDULE = "set_device_schedule"
 
 ATTR_VALUE = "value"
 ATTR_OFFSET = "offset"
 ATTR_MAX_YEARS = "max_years"
+ATTR_SCHEDULE = "schedule"
 
 _TARGET_SCHEMA = vol.Schema({vol.Required(CONF_ENTITY_ID): cv.entity_ids})
 
@@ -45,6 +52,9 @@ CALCULATE_ALL_STATS_VALUES_SCHEMA = vol.Schema(
     {
         **_MAX_YEARS_SCHEMA,
     }
+)
+SET_DEVICE_SCHEDULE_SCHEMA = _TARGET_SCHEMA.extend(
+    {vol.Optional(ATTR_SCHEDULE): vol.Any(dict, list)}
 )
 
 
@@ -87,11 +97,45 @@ def async_register_services(hass: HomeAssistant) -> None:
             _async_calculate_stats_values(entities, max_years=max_years)
         )
 
+    async def _async_set_device_schedule(call: ServiceCall) -> None:
+        entity_ids = call.data[CONF_ENTITY_ID]
+        if len(entity_ids) != 1:
+            raise HomeAssistantError("Select exactly one battery schedule sensor")
+        schedule_entities = hass.data.get(DOMAIN, {}).get(HEMS_SCHEDULE_ENTITY_MAP, {})
+        entity = schedule_entities.get(entity_ids[0])
+        if not isinstance(entity, SOLARWATTScheduleSensor):
+            raise HomeAssistantError(
+                f"{entity_ids[0]} is not a SOLARWATT battery schedule sensor"
+            )
+        if ATTR_SCHEDULE in call.data:
+            schedule = call.data[ATTR_SCHEDULE]
+        else:
+            schedule = getattr(entity.coordinator, "hems_schedules", {}).get(
+                entity.device_id
+            )
+            if schedule is None:
+                raise HomeAssistantError(
+                    "No cached schedule. Fetch the schedule first or provide JSON."
+                )
+        try:
+            await entity.coordinator.async_set_hems_device_schedule(
+                entity.device_id,
+                schedule,
+            )
+        except (SolarwattError, ValueError) as err:
+            raise HomeAssistantError(f"Unable to update battery schedule: {err}") from err
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_CALCULATE_ALL_STATS_VALUES,
         _async_calculate_all_stats_values,
         schema=CALCULATE_ALL_STATS_VALUES_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_DEVICE_SCHEDULE,
+        _async_set_device_schedule,
+        schema=SET_DEVICE_SCHEDULE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

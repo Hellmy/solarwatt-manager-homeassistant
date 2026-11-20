@@ -647,6 +647,13 @@
       },
       "kiwi_os_version": {
         "name": "kiwiOS-versie"
+      },
+      "device_schedule": {
+        "name": "Batterijschema",
+        "state": {
+          "retrieved": "Opgehaald",
+          "not_retrieved": "Niet opgehaald"
+        }
       }
     },
     "button": {
@@ -658,6 +665,12 @@
       },
       "diagnostics_refresh": {
         "name": "Gegevens bijwerken"
+      },
+      "schedule_refresh": {
+        "name": "Schema ophalen"
+      },
+      "schedule_set": {
+        "name": "Schema verzenden"
       }
     },
     "switch": {
@@ -714,6 +727,16 @@
     "reset_stats_value": {
       "name": "Statistiek-totaalwaarde resetten",
       "description": "Verwijdert de opgeslagen offset van een SOLARWATT statistiek-totaalsensor."
+    },
+    "set_device_schedule": {
+      "name": "Batterijschema instellen",
+      "description": "Verstuurt het opgeslagen GET-schema of vervangt dit door aangepaste JSON-inhoud.",
+      "fields": {
+        "schedule": {
+          "name": "Aangepast schema",
+          "description": "Optioneel JSON-object of -array. Zonder invoer wordt het laatst opgehaalde schema verzonden."
+        }
+      }
     }
   }
 }

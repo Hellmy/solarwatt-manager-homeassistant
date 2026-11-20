@@ -483,7 +483,8 @@ class KiwiGridHEMSClient:
         *,
         payload: Any = None,
         where: str,
-    ) -> None:
+        capture_response: bool = False,
+    ) -> dict[str, Any] | None:
         await self._async_ensure_access_token()
 
         for attempt in range(2):
@@ -523,6 +524,16 @@ class KiwiGridHEMSClient:
                         )
 
                     resp.raise_for_status()
+                    if capture_response:
+                        text = await resp.text()
+                        if not text.strip():
+                            response_body = None
+                        else:
+                            try:
+                                response_body = json.loads(text)
+                            except json.JSONDecodeError:
+                                response_body = text[:2000]
+                        return {"status": resp.status, "body": response_body}
                     return
             except KiwiGridHEMSError:
                 raise
@@ -670,19 +681,23 @@ class KiwiGridHEMSClient:
             where="GET /v12/device/{id}/schedule",
         )
 
-    async def async_set_device_schedule(self, device_id: str, schedule: Any) -> None:
+    async def async_set_device_schedule(
+        self, device_id: str, schedule: Any
+    ) -> dict[str, Any]:
         """Replace a KiwiGrid HEMS device schedule."""
         safe_device_id = quote(str(device_id or "").strip(), safe="")
         if not safe_device_id:
             raise KiwiGridHEMSProtocolError("KiwiGrid HEMS device id is missing")
         if not isinstance(schedule, (dict, list)):
             raise KiwiGridHEMSProtocolError("Schedule must be a JSON object or array")
-        await self._async_send_json(
+        response = await self._async_send_json(
             "PUT",
             f"/device/{safe_device_id}/schedule",
             payload=schedule,
             where="PUT /v12/device/{id}/schedule",
+            capture_response=True,
         )
+        return response or {"status": None, "body": None}
 
     # /v12/plug ------------------------------------------------------------
     async def async_get_plugs(self) -> list[dict[str, Any]]:

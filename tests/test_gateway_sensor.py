@@ -27,7 +27,7 @@ def modules():
             ),
         ),
         "homeassistant.helpers.entity": make_module(
-            "homeassistant.helpers.entity", EntityCategory=SimpleNamespace(DIAGNOSTIC="diagnostic")
+            "homeassistant.helpers.entity", EntityCategory=SimpleNamespace(DIAGNOSTIC="diagnostic", CONFIG="config")
         ),
         "homeassistant.helpers.entity_platform": make_module(
             "homeassistant.helpers.entity_platform", AddEntitiesCallback=object
@@ -88,6 +88,55 @@ def test_version_sensor_discovery_respects_flow_selection(modules, selection, lo
         entry, {}, {}, {uid}, coordinator.things
     )
     assert sensor._attr_unique_id in expected_ids
+
+
+def test_battery_schedule_sensor_exposes_cached_response(modules):
+    uid = "battery-thing"
+    device_id = "battery-id"
+    thing = {
+        "UID": uid,
+        "thingTypeUID": "kiwigrid-hems:battery",
+        "label": "Home Battery",
+        "properties": {"kiwigridKind": "battery", "identifier": device_id},
+    }
+    entry = SimpleNamespace(entry_id="entry", data={"installation_id": "installation"})
+    coordinator = SimpleNamespace(
+        entry=entry,
+        hass=SimpleNamespace(devices=None),
+        client=SimpleNamespace(host=""),
+        things={uid: thing},
+        data={},
+        item_to_thing_uid={},
+        hems_schedules={},
+        hems_schedule_put_results={},
+    )
+    sensor = next(
+        entity
+        for entity in modules.sensor._collect_new_entities(
+            coordinator, entry, {}, {uid}, 0.01, 3, set(), set(), set()
+        )
+        if isinstance(entity, modules.sensor.SOLARWATTScheduleSensor)
+    )
+
+    assert sensor._attr_unique_id == "entry_thing_battery-thing_schedule"
+    assert sensor.entity_description.entity_category == "diagnostic"
+    assert sensor.native_value == "not_retrieved"
+    assert sensor.extra_state_attributes == {}
+    coordinator.hems_schedules[device_id] = {"schedule": [{"start": "08:00"}]}
+    assert sensor.native_value == "retrieved"
+    assert sensor.extra_state_attributes == {
+        "schedule": {"schedule": [{"start": "08:00"}]}
+    }
+    coordinator.hems_schedule_put_results[device_id] = {
+        "http_status": 200,
+        "response": {"accepted": True},
+        "readback_matches": False,
+    }
+    assert sensor.extra_state_attributes["last_put_result"] == {
+        "http_status": 200,
+        "response": {"accepted": True},
+        "readback_matches": False,
+    }
     assert sensor._attr_unique_id not in modules.entity_helpers._selected_entity_unique_ids(
         entry, {}, {}, set(), coordinator.things
     )

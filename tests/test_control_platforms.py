@@ -91,6 +91,9 @@ def _setup(platform, things, options=None, entry_id="entry"):
         async_clear_hems_device_optimization_state=AsyncMock(),
         async_reset_hems_device_optimization_config=AsyncMock(),
         async_update_hems_device_optimization_config=AsyncMock(),
+        async_get_hems_device_schedule=AsyncMock(),
+        async_set_hems_device_schedule=AsyncMock(),
+        hems_schedules={},
     )
     entry.runtime_data = coordinator
     batches = []
@@ -231,6 +234,65 @@ def test_reset_button_discovery_command_and_errors(platforms):
     assert len([e for batch in rig.batches for e in batch if isinstance(
         e, platforms.button.SOLARWATTOverrideResetButton
     )]) == 1
+
+
+def test_battery_schedule_button_fetches_schedule(platforms):
+    battery = _thing(
+        "battery",
+        kiwigridKind="battery",
+        identifier="battery-id",
+    )
+    rig = _setup(platforms.button, {"battery": battery})
+    buttons = [
+        entity
+        for batch in rig.batches
+        for entity in batch
+        if isinstance(entity, platforms.button.SOLARWATTScheduleRefreshButton)
+    ]
+
+    assert len(buttons) == 1
+    assert buttons[0]._attr_unique_id == "entry_thing_battery_schedule_refresh"
+    asyncio.run(buttons[0].async_press())
+    rig.coordinator.async_get_hems_device_schedule.assert_awaited_once_with("battery-id")
+
+
+def test_battery_schedule_set_button_sends_cached_get_response(platforms):
+    battery = _thing(
+        "battery",
+        kiwigridKind="battery",
+        identifier="battery-id",
+    )
+    rig = _setup(platforms.button, {"battery": battery})
+    buttons = [
+        entity
+        for batch in rig.batches
+        for entity in batch
+        if isinstance(entity, platforms.button.SOLARWATTScheduleSetButton)
+    ]
+    schedule = {"schedule": [{"start": "08:00", "enabled": True}]}
+    rig.coordinator.hems_schedules["battery-id"] = schedule
+
+    assert len(buttons) == 1
+    assert buttons[0]._attr_unique_id == "entry_thing_battery_schedule_set"
+    asyncio.run(buttons[0].async_press())
+    rig.coordinator.async_set_hems_device_schedule.assert_awaited_once_with(
+        "battery-id", schedule
+    )
+
+
+def test_battery_schedule_set_button_requires_prior_get(platforms):
+    battery = _thing("battery", kiwigridKind="battery", identifier="battery-id")
+    rig = _setup(platforms.button, {"battery": battery})
+    button = next(
+        entity
+        for batch in rig.batches
+        for entity in batch
+        if isinstance(entity, platforms.button.SOLARWATTScheduleSetButton)
+    )
+
+    with pytest.raises(RuntimeError, match="Get the schedule before sending it"):
+        asyncio.run(button.async_press())
+    rig.coordinator.async_set_hems_device_schedule.assert_not_awaited()
 
 
 

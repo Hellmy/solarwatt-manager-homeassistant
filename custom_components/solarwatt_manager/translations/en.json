@@ -647,6 +647,13 @@
       },
       "kiwi_os_version": {
         "name": "kiwiOS version"
+      },
+      "device_schedule": {
+        "name": "Battery schedule",
+        "state": {
+          "retrieved": "Retrieved",
+          "not_retrieved": "Not retrieved"
+        }
       }
     },
     "button": {
@@ -658,6 +665,12 @@
       },
       "diagnostics_refresh": {
         "name": "Update data"
+      },
+      "schedule_refresh": {
+        "name": "Get schedule"
+      },
+      "schedule_set": {
+        "name": "Set schedule"
       }
     },
     "switch": {
@@ -714,6 +727,16 @@
     "reset_stats_value": {
       "name": "Reset stats total value",
       "description": "Remove the stored offset from a SOLARWATT stats total sensor."
+    },
+    "set_device_schedule": {
+      "name": "Set battery schedule",
+      "description": "Send the cached GET schedule, or replace it with an edited JSON request body.",
+      "fields": {
+        "schedule": {
+          "name": "Edited schedule",
+          "description": "Optional JSON object or array. When omitted, the most recently fetched schedule is sent."
+        }
+      }
     }
   }
 }

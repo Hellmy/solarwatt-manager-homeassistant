@@ -553,6 +553,29 @@ def test_config_update_refreshes_device_metadata():
     coordinator.async_request_refresh.assert_awaited_once()
 
 
+@pytest.mark.parametrize("readback_matches", [True, False])
+def test_schedule_update_reports_put_response_and_get_verification(readback_matches):
+    from unittest.mock import AsyncMock
+
+    coordinator, _, client = _coordinator()
+    schedule = {"schedule": [{"start": "08:00"}]}
+    readback = schedule if readback_matches else {"schedule": []}
+    client.async_set_hems_device_schedule = AsyncMock(
+        return_value={"status": 200, "body": {"accepted": True}}
+    )
+    client.async_get_hems_device_schedule = AsyncMock(return_value=readback)
+
+    result = asyncio.run(coordinator.async_set_hems_device_schedule("battery", schedule))
+
+    assert result == {
+        "http_status": 200,
+        "response": {"accepted": True},
+        "readback_matches": readback_matches,
+    }
+    assert coordinator.hems_schedules["battery"] == readback
+    assert coordinator.hems_schedule_put_results["battery"] == result
+
+
 
 def test_config_reset_refreshes_metadata_without_assuming_state():
     from unittest.mock import AsyncMock

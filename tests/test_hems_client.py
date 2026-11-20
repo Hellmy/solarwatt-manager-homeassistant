@@ -1826,6 +1826,39 @@ def test_config_update_only_patches_config_and_never_schedules():
     assert calls == [("PATCH", "/device/device%2Fid/optimization/config", config)]
 
 
+def test_device_schedule_put_returns_http_status_and_response_body():
+    class FakeResponse:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def text(self):
+            return '{"accepted": true}'
+
+        def raise_for_status(self):
+            return None
+
+    class FakeSession:
+        def request(self, method, url, **kwargs):
+            assert method == "PUT"
+            assert url.endswith("/device/battery-id/schedule")
+            assert kwargs["json"] == {"schedule": []}
+            return FakeResponse()
+
+    result = asyncio.run(
+        KiwiGridHEMSClient(
+            session=FakeSession(),
+            access_token="test-token",
+        ).async_set_device_schedule("battery-id", {"schedule": []})
+    )
+
+    assert result == {"status": 200, "body": {"accepted": True}}
+
+
 
 @pytest.mark.parametrize("mode", ["PV_EXCESS", "DEPARTURE_TIME"])
 def test_reset_uses_device_defaults_and_preserves_active_mode(mode):

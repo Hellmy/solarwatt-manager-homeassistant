@@ -647,6 +647,13 @@
       },
       "kiwi_os_version": {
         "name": "Versione kiwiOS"
+      },
+      "device_schedule": {
+        "name": "Programma della batteria",
+        "state": {
+          "retrieved": "Recuperato",
+          "not_retrieved": "Non recuperato"
+        }
       }
     },
     "button": {
@@ -658,6 +665,12 @@
       },
       "diagnostics_refresh": {
         "name": "Aggiorna dati"
+      },
+      "schedule_refresh": {
+        "name": "Recupera programma"
+      },
+      "schedule_set": {
+        "name": "Invia programma"
       }
     },
     "switch": {
@@ -714,6 +727,16 @@
     "reset_stats_value": {
       "name": "Reimposta valore totale statistico",
       "description": "Rimuove l'offset salvato da un sensore Totale statistiche SOLARWATT."
+    },
+    "set_device_schedule": {
+      "name": "Imposta programma batteria",
+      "description": "Invia il programma GET memorizzato oppure lo sostituisce con un corpo JSON modificato.",
+      "fields": {
+        "schedule": {
+          "name": "Programma modificato",
+          "description": "Oggetto o array JSON facoltativo. Se omesso, viene inviato l'ultimo programma recuperato."
+        }
+      }
     }
   }
 }

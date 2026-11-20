@@ -35,7 +35,10 @@ from .entity_helpers import (
     build_item_sensor_unique_id,
     build_stats_total_sensor_unique_id,
     build_thing_sensor_unique_id,
+    build_thing_schedule_unique_id,
     collect_new_thing_entities,
+    get_hems_device_id,
+    is_hems_battery_thing,
     is_stats_total_source_item_name,
     iter_item_sensor_names,
 )
@@ -45,11 +48,18 @@ from .sensor_meta import guess_ha_meta
 from .stats_total import StatsTotalStore
 
 STATS_TOTAL_ENTITY_MAP = "stats_total_entities"
+HEMS_SCHEDULE_ENTITY_MAP = "hems_schedule_entities"
 GATEWAY_VERSION_DESCRIPTION = SensorEntityDescription(
     key=GATEWAY_VERSION_ITEM_NAME,
     translation_key="kiwi_os_version",
     entity_category=EntityCategory.DIAGNOSTIC,
     icon="mdi:information-outline",
+)
+DEVICE_SCHEDULE_DESCRIPTION = SensorEntityDescription(
+    key="device_schedule",
+    translation_key="device_schedule",
+    entity_category=EntityCategory.DIAGNOSTIC,
+    icon="mdi:calendar-clock",
 )
 
 SELFSUPPLY_DESCRIPTIONS = {
@@ -100,6 +110,7 @@ async def async_setup_entry(
     added_item_names: set[str] = set()
     added_stats_total_item_names: set[str] = set()
     added_thing_uids: set[str] = set()
+    added_schedule_uids: set[str] = set()
 
     @callback
     def _async_discover_new_entities(options: Mapping[str, Any] | None = None) -> None:
@@ -115,6 +126,7 @@ async def async_setup_entry(
             added_item_names,
             added_stats_total_item_names,
             added_thing_uids,
+            added_schedule_uids,
         ):
             async_add_entities(new_entities)
 
@@ -132,8 +144,10 @@ def _collect_new_entities(
     added_item_names: set[str],
     added_stats_total_item_names: set[str],
     added_thing_uids: set[str],
+    added_schedule_uids: set[str] | None = None,
 ) -> list[SensorEntity]:
     """Build newly discovered item and thing sensors that are not added yet."""
+    added_schedule_uids = added_schedule_uids if added_schedule_uids is not None else set()
     entities: list[SensorEntity] = []
     if (
         ENERGY_OVERVIEW_THING_UID in coordinator.things
@@ -181,6 +195,24 @@ def _collect_new_entities(
                     store=coordinator.stats_total_store,
                 )
             )
+
+    for thing_uid, thing in (coordinator.things or {}).items():
+        if (
+            thing_uid in added_schedule_uids
+            or (selected_thing_uids is not None and thing_uid not in selected_thing_uids)
+            or not is_hems_battery_thing(thing)
+        ):
+            continue
+        added_schedule_uids.add(thing_uid)
+        entities.append(
+            SOLARWATTScheduleSensor(
+                coordinator,
+                entry.entry_id,
+                thing_uid,
+                thing,
+                selected_thing_uids,
+            )
+        )
 
     entities.extend(
         collect_new_thing_entities(
@@ -660,3 +692,54 @@ class SOLARWATTThingSensor(CoordinatorEntity, SensorEntity):
             return {}
         props = thing.get("properties")
         return props if isinstance(props, dict) else {}
+
+
+class SOLARWATTScheduleSensor(CoordinatorEntity, SensorEntity):
+    """Display a Battery's last fetched schedule in its device view."""
+
+    _attr_has_entity_name = True
+    entity_description = DEVICE_SCHEDULE_DESCRIPTION
+
+    def __init__(self, coordinator, entry_id, thing_uid, thing, selected_thing_uids):
+        super().__init__(coordinator)
+        self._device_id = get_hems_device_id(thing, thing_uid)
+        self._attr_unique_id = build_thing_schedule_unique_id(entry_id, thing_uid)
+        self._attr_device_info = build_thing_device_info(
+            coordinator.hass,
+            get_device_registry_anchor(coordinator.entry),
+            thing,
+            coordinator.things,
+            selected_thing_uids,
+            str(coordinator.client.host or ""),
+            config_entry_id=entry_id,
+        )
+
+    @property
+    def device_id(self) -> str:
+        return self._device_id
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.hass.data.setdefault(DOMAIN, {}).setdefault(HEMS_SCHEDULE_ENTITY_MAP, {})[
+            self.entity_id
+        ] = self
+
+    async def async_will_remove_from_hass(self) -> None:
+        entities = self.hass.data.get(DOMAIN, {}).get(HEMS_SCHEDULE_ENTITY_MAP, {})
+        entities.pop(self.entity_id, None)
+        await super().async_will_remove_from_hass()
+
+    @property
+    def native_value(self) -> str:
+        return "retrieved" if self._device_id in self.coordinator.hems_schedules else "not_retrieved"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attributes: dict[str, Any] = {}
+        if self._device_id in self.coordinator.hems_schedules:
+            attributes["schedule"] = self.coordinator.hems_schedules[self._device_id]
+        if result := getattr(self.coordinator, "hems_schedule_put_results", {}).get(
+            self._device_id
+        ):
+            attributes["last_put_result"] = result
+        return attributes

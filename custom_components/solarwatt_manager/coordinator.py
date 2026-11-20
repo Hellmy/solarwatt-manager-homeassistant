@@ -60,6 +60,7 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
         self._hems_items_cache: list[dict[str, Any]] = []
         self._hems_energy_flow_cache: list[dict[str, Any]] = []
         self.hems_schedules: dict[str, Any] = {}
+        self.hems_schedule_put_results: dict[str, dict[str, Any]] = {}
         self._hems_items_error: SolarwattError | None = None
         self._hems_energy_flow_error: SolarwattError | None = None
         self._hems_last_attempt: float | None = None
@@ -280,6 +281,7 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
         self._hems_items_cache = []
         self._hems_energy_flow_cache = []
         self.hems_schedules = {}
+        self.hems_schedule_put_results = {}
         self._hems_items_error = None
         self._hems_energy_flow_error = None
         self._hems_last_attempt = None
@@ -525,18 +527,26 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
         self,
         device_id: str,
         schedule: Any,
-    ) -> Any:
-        """Replace a device schedule and refresh the published server value."""
+    ) -> dict[str, Any]:
+        """Replace a device schedule and report the PUT and GET verification."""
         enabled, username, password = self._hems_credentials()
         if not enabled or not (username and password):
             raise SolarwattError("KiwiGrid HEMS is not configured")
-        await self.client.async_set_hems_device_schedule(
+        put_response = await self.client.async_set_hems_device_schedule(
             device_id,
             schedule,
             username=username,
             password=password,
         )
-        return await self.async_get_hems_device_schedule(device_id)
+        verified_schedule = await self.async_get_hems_device_schedule(device_id)
+        result = {
+            "http_status": put_response.get("status"),
+            "response": put_response.get("body"),
+            "readback_matches": verified_schedule == schedule,
+        }
+        self.hems_schedule_put_results[device_id] = result
+        self.async_update_listeners()
+        return result
 
     async def async_set_hems_device_optimization_state(
         self,

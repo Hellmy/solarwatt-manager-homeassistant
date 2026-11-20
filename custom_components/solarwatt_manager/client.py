@@ -1162,14 +1162,14 @@ class SOLARWATTClient:
         *,
         username: str = "",
         password: str = "",
-    ) -> None:
+    ) -> dict[str, Any]:
         """Replace one KiwiGrid HEMS device schedule."""
         hems = self._get_hems_client(username, password)
         if not hems.enabled:
             raise SolarwattAuthError("KiwiGrid HEMS credentials are missing")
         try:
             async with self._hems_config_lock:
-                await hems.async_set_device_schedule(device_id, schedule)
+                return await hems.async_set_device_schedule(device_id, schedule)
         except KiwiGridHEMSAuthError as err:
             raise SolarwattAuthError(f"KiwiGrid HEMS authentication failed: {err}") from err
         except KiwiGridHEMSError as err:

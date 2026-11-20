@@ -32,6 +32,12 @@ def platforms():
             TimeEntityDescription=SimpleNamespace,
         ),
         "homeassistant.components.button": make_module("homeassistant.components.button", ButtonEntity=type("ButtonEntity", (), {})),
+        "homeassistant.components.text": make_module(
+            "homeassistant.components.text",
+            TextEntity=type("TextEntity", (), {}),
+            TextEntityDescription=SimpleNamespace,
+            TextMode=SimpleNamespace(TEXT="text"),
+        ),
         "homeassistant.helpers.entity": make_module("homeassistant.helpers.entity", EntityCategory=SimpleNamespace(DIAGNOSTIC="diagnostic", CONFIG="config")),
         **make_homeassistant_stubs(),
         "homeassistant.exceptions": make_module(
@@ -51,7 +57,7 @@ def platforms():
         ),
     }
     loaded = {}
-    for name in ("const", "entity_helpers", "select", "switch", "button", "number", "time"):
+    for name in ("const", "entity_helpers", "schedule_fields", "select", "switch", "button", "number", "time", "text"):
         loaded[name] = load_component_module_with_stubs(name, package_name=package, stubs=stubs)
         stubs[f"{package}.{name}"] = loaded[name]
     return SimpleNamespace(**loaded)
@@ -96,6 +102,7 @@ def _setup(platform, things, options=None, entry_id="entry"):
         async_get_hems_device_schedule=AsyncMock(),
         async_set_hems_device_schedule=AsyncMock(),
         hems_schedules={},
+        hems_schedule_day_inputs={},
         data={},
         item_to_thing_uid={},
         async_update_listeners=lambda: None,
@@ -274,15 +281,79 @@ def test_battery_schedule_set_button_sends_cached_get_response(platforms):
         for entity in batch
         if isinstance(entity, platforms.button.SOLARWATTScheduleSetButton)
     ]
-    schedule = {"schedule": [{"start": "08:00", "enabled": True}]}
+    schedule = {
+        "wednesday": [{
+            "start": "08:00", "end": "09:00",
+            "mode": "BATTERY_CHARGE", "isUserSchedule": True,
+        }]
+    }
     rig.coordinator.hems_schedules["battery-id"] = schedule
+    rig.coordinator.hems_schedule_day_inputs["battery-id"] = {
+        day: "" for day in platforms.schedule_fields.WEEKDAYS
+    }
+    rig.coordinator.hems_schedule_day_inputs["battery-id"]["wednesday"] = "on08-09"
 
     assert len(buttons) == 1
     assert buttons[0]._attr_unique_id == "entry_thing_battery_schedule_set"
     asyncio.run(buttons[0].async_press())
     rig.coordinator.async_set_hems_device_schedule.assert_awaited_once_with(
-        "battery-id", schedule
+        "battery-id", {
+            **{day: [] for day in platforms.schedule_fields.WEEKDAYS},
+            "wednesday": [{
+                "start": "08:00", "end": "09:00",
+                "mode": "BATTERY_CHARGE", "isUserSchedule": True,
+            }],
+        }
     )
+
+
+def test_battery_schedule_set_button_sends_empty_object_for_empty_fields(platforms):
+    battery = _thing("battery", kiwigridKind="battery", identifier="battery-id")
+    rig = _setup(platforms.button, {"battery": battery})
+    rig.coordinator.hems_schedules["battery-id"] = {day: [] for day in platforms.schedule_fields.WEEKDAYS}
+    rig.coordinator.hems_schedule_day_inputs["battery-id"] = {
+        day: "" for day in platforms.schedule_fields.WEEKDAYS
+    }
+    button = next(
+        entity for batch in rig.batches for entity in batch
+        if isinstance(entity, platforms.button.SOLARWATTScheduleSetButton)
+    )
+
+    asyncio.run(button.async_press())
+
+    rig.coordinator.async_set_hems_device_schedule.assert_awaited_once_with("battery-id", {})
+
+
+def test_battery_schedule_clear_button_only_clears_text_fields(platforms):
+    battery = _thing("battery", kiwigridKind="battery", identifier="battery-id")
+    rig = _setup(platforms.button, {"battery": battery})
+    rig.coordinator.hems_schedule_day_inputs["battery-id"] = {"wednesday": "on08-09"}
+    button = next(
+        entity for batch in rig.batches for entity in batch
+        if isinstance(entity, platforms.button.SOLARWATTScheduleFieldsClearButton)
+    )
+
+    asyncio.run(button.async_press())
+
+    assert rig.coordinator.hems_schedule_day_inputs["battery-id"] == {
+        day: "" for day in platforms.schedule_fields.WEEKDAYS
+    }
+    rig.coordinator.async_set_hems_device_schedule.assert_not_awaited()
+
+
+def test_battery_schedule_text_fields_show_get_and_store_edits(platforms):
+    battery = _thing("battery", kiwigridKind="battery", identifier="battery-id")
+    rig = _setup(platforms.text, {"battery": battery})
+    assert len(rig.batches) == 7
+    fields = {entity._day: entity for batch in rig.batches for entity in batch}
+    assert set(fields) == set(platforms.schedule_fields.WEEKDAYS)
+
+    rig.coordinator.hems_schedule_day_inputs["battery-id"] = {
+        "wednesday": "on08:30-09:30;off12:30-13:30"
+    }
+    assert fields["wednesday"].native_value == "on08:30-09:30;off12:30-13:30"
+    asyncio.run(fields["monday"].async_set_value("off14:30-18;on20-22"))
+    assert rig.coordinator.hems_schedule_day_inputs["battery-id"]["monday"] == "off14:30-18;on20-22"
 
 
 def test_battery_schedule_set_button_requires_prior_get(platforms):

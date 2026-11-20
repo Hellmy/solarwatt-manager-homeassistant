@@ -8,7 +8,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from .module_loader import load_component_module_with_stubs, make_module
+from .module_loader import load_component_module, load_component_module_with_stubs, make_module
+
+schedule_fields = load_component_module("schedule_fields")
 
 
 def _load_coordinator_module():
@@ -111,6 +113,7 @@ def _load_coordinator_module():
                 f"{package_name}.hems_api",
                 item_names_to_thing_uids=lambda *args: {},
             ),
+            f"{package_name}.schedule_fields": schedule_fields,
             f"{package_name}.state_parser": make_module(
                 f"{package_name}.state_parser",
                 SOLARWATTItem=SOLARWATTItem,
@@ -592,6 +595,35 @@ def test_battery_backup_state_of_charge_converts_percent_to_fraction(monkeypatch
     coordinator.async_request_refresh.assert_awaited_once()
 
 
+def test_get_battery_schedule_populates_all_weekday_inputs():
+    from unittest.mock import AsyncMock
+
+    coordinator, _, client = _coordinator()
+    schedule = {
+        "wednesday": [
+            {
+                "start": "08:30",
+                "end": "09:30",
+                "mode": "BATTERY_CHARGE",
+                "isUserSchedule": True,
+            },
+            {
+                "start": "12:30",
+                "end": "13:30",
+                "mode": "BATTERY_HOLD_CURRENT_SOC",
+                "isUserSchedule": True,
+            },
+        ]
+    }
+    client.async_get_hems_device_schedule = AsyncMock(return_value=schedule)
+
+    asyncio.run(coordinator.async_get_hems_device_schedule("battery-id"))
+
+    assert coordinator.hems_schedule_day_inputs["battery-id"] == {
+        day: "" for day in schedule_fields.WEEKDAYS if day != "wednesday"
+    } | {"wednesday": "on08:30-09:30;off12:30-13:30"}
+
+
 def test_battery_backup_state_of_charge_debounces_to_last_value(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
@@ -633,16 +665,28 @@ def test_battery_backup_state_of_charge_rejects_invalid_values(value):
 
 
 @pytest.mark.parametrize("readback_matches", [True, False])
-def test_schedule_update_reports_put_response_and_get_verification(readback_matches):
+def test_schedule_update_reports_put_response_and_get_verification(readback_matches, monkeypatch):
     from unittest.mock import AsyncMock
 
     coordinator, _, client = _coordinator()
     schedule = {"schedule": [{"start": "08:00"}]}
     readback = schedule if readback_matches else {"schedule": []}
-    client.async_set_hems_device_schedule = AsyncMock(
-        return_value={"status": 200, "body": {"accepted": True}}
-    )
-    client.async_get_hems_device_schedule = AsyncMock(return_value=readback)
+    call_order = []
+
+    async def fake_sleep(delay):
+        call_order.append(("sleep", delay))
+
+    async def put_schedule(*args, **kwargs):
+        call_order.append("put")
+        return {"status": 200, "body": {"accepted": True}}
+
+    async def get_schedule(*args, **kwargs):
+        call_order.append("get")
+        return readback
+
+    monkeypatch.setattr(coordinator_module.asyncio, "sleep", fake_sleep)
+    client.async_set_hems_device_schedule = AsyncMock(side_effect=put_schedule)
+    client.async_get_hems_device_schedule = AsyncMock(side_effect=get_schedule)
 
     result = asyncio.run(coordinator.async_set_hems_device_schedule("battery", schedule))
 
@@ -653,6 +697,7 @@ def test_schedule_update_reports_put_response_and_get_verification(readback_matc
     }
     assert coordinator.hems_schedules["battery"] == readback
     assert coordinator.hems_schedule_put_results["battery"] == result
+    assert call_order == ["put", ("sleep", 10), "get"]
 
 
 

@@ -36,6 +36,7 @@ from .entity_helpers import (
     update_manager_device_info,
 )
 from .hems_api import item_names_to_thing_uids
+from .schedule_fields import schedule_to_day_inputs
 from .state_parser import SOLARWATTItem, parse_state
 from .thing_matching import (
     merge_thing_records as _merge_thing_records,
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 
 
 BACKUP_STATE_OF_CHARGE_UPDATE_DELAY = 10
+SCHEDULE_READBACK_DELAY = 10
 
 
 class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
@@ -67,6 +69,7 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
         self._hems_items_cache: list[dict[str, Any]] = []
         self._hems_energy_flow_cache: list[dict[str, Any]] = []
         self.hems_schedules: dict[str, Any] = {}
+        self.hems_schedule_day_inputs: dict[str, dict[str, str]] = {}
         self.hems_schedule_put_results: dict[str, dict[str, Any]] = {}
         self.hems_backup_state_of_charge: dict[str, float] = {}
         self._hems_backup_state_of_charge_tasks: dict[str, asyncio.Task[None]] = {}
@@ -290,6 +293,7 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
         self._hems_items_cache = []
         self._hems_energy_flow_cache = []
         self.hems_schedules = {}
+        self.hems_schedule_day_inputs = {}
         self.hems_schedule_put_results = {}
         self._hems_items_error = None
         self._hems_energy_flow_error = None
@@ -599,6 +603,7 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
             password=password,
         )
         self.hems_schedules[device_id] = schedule
+        self.hems_schedule_day_inputs[device_id] = schedule_to_day_inputs(schedule)
         self.async_update_listeners()
         return schedule
 
@@ -617,6 +622,7 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
             username=username,
             password=password,
         )
+        await asyncio.sleep(SCHEDULE_READBACK_DELAY)
         verified_schedule = await self.async_get_hems_device_schedule(device_id)
         result = {
             "http_status": put_response.get("status"),
@@ -624,6 +630,7 @@ class SOLARWATTCoordinator(DataUpdateCoordinator[dict[str, SOLARWATTItem]]):
             "readback_matches": verified_schedule == schedule,
         }
         self.hems_schedule_put_results[device_id] = result
+        self.hems_schedule_day_inputs.pop(device_id, None)
         self.async_update_listeners()
         return result
 

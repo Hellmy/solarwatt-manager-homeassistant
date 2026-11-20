@@ -668,6 +668,15 @@
         }
       }
     },
+    "text": {
+      "schedule_monday": {"name": "Programme du lundi"},
+      "schedule_tuesday": {"name": "Programme du mardi"},
+      "schedule_wednesday": {"name": "Programme du mercredi"},
+      "schedule_thursday": {"name": "Programme du jeudi"},
+      "schedule_friday": {"name": "Programme du vendredi"},
+      "schedule_saturday": {"name": "Programme du samedi"},
+      "schedule_sunday": {"name": "Programme du dimanche"}
+    },
     "button": {
       "optimization_config_reset": {
         "name": "Réinitialiser les paramètres d’optimisation"
@@ -683,6 +692,9 @@
       },
       "schedule_set": {
         "name": "Envoyer le programme"
+      },
+      "schedule_fields_clear": {
+        "name": "Effacer les champs journaliers"
       }
     },
     "switch": {

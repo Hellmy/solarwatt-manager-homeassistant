@@ -668,6 +668,15 @@
         }
       }
     },
+    "text": {
+      "schedule_monday": {"name": "Monday schedule"},
+      "schedule_tuesday": {"name": "Tuesday schedule"},
+      "schedule_wednesday": {"name": "Wednesday schedule"},
+      "schedule_thursday": {"name": "Thursday schedule"},
+      "schedule_friday": {"name": "Friday schedule"},
+      "schedule_saturday": {"name": "Saturday schedule"},
+      "schedule_sunday": {"name": "Sunday schedule"}
+    },
     "button": {
       "optimization_config_reset": {
         "name": "Reset optimization settings"
@@ -683,6 +692,9 @@
       },
       "schedule_set": {
         "name": "Set schedule"
+      },
+      "schedule_fields_clear": {
+        "name": "Clear day fields"
       }
     },
     "switch": {

@@ -89,6 +89,14 @@ def build_thing_schedule_set_unique_id(entry_id: str, thing_uid: str) -> str:
     return f"{build_thing_sensor_unique_id(entry_id, thing_uid)}_schedule_set"
 
 
+def build_thing_schedule_fields_clear_unique_id(entry_id: str, thing_uid: str) -> str:
+    return f"{build_thing_sensor_unique_id(entry_id, thing_uid)}_schedule_fields_clear"
+
+
+def build_thing_schedule_day_unique_id(entry_id: str, thing_uid: str, day: str) -> str:
+    return f"{build_thing_sensor_unique_id(entry_id, thing_uid)}_schedule_{day}"
+
+
 def build_thing_backup_state_of_charge_unique_id(entry_id: str, thing_uid: str) -> str:
     return f"{build_thing_sensor_unique_id(entry_id, thing_uid)}_backup_state_of_charge"
 
@@ -289,6 +297,11 @@ def _selected_entity_unique_ids(
                 expected_unique_ids.add(build_thing_schedule_unique_id(entry.entry_id, thing_uid))
                 expected_unique_ids.add(build_thing_schedule_refresh_unique_id(entry.entry_id, thing_uid))
                 expected_unique_ids.add(build_thing_schedule_set_unique_id(entry.entry_id, thing_uid))
+                expected_unique_ids.add(build_thing_schedule_fields_clear_unique_id(entry.entry_id, thing_uid))
+                expected_unique_ids.update(
+                    build_thing_schedule_day_unique_id(entry.entry_id, thing_uid, day)
+                    for day in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+                )
                 expected_unique_ids.add(build_thing_backup_state_of_charge_unique_id(entry.entry_id, thing_uid))
             if has_optimization_defaults(thing):
                 expected_unique_ids.add(build_thing_config_reset_unique_id(entry.entry_id, thing_uid))

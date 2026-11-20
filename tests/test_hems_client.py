@@ -1876,6 +1876,50 @@ def test_device_schedule_put_returns_http_status_and_response_body():
     assert result == {"status": 200, "body": {"accepted": True}}
 
 
+def test_device_schedule_get_treats_not_found_as_empty_schedule():
+    class FakeResponse:
+        status = 404
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    class FakeSession:
+        def get(self, url, **kwargs):
+            assert url.endswith("/device/battery-id/schedule")
+            return FakeResponse()
+
+    result = asyncio.run(
+        KiwiGridHEMSClient(
+            session=FakeSession(),
+            access_token="test-token",
+        ).async_get_device_schedule("battery-id")
+    )
+
+    assert result == {}
+
+
+def test_other_hems_get_still_raises_on_not_found():
+    class FakeResponse:
+        status = 404
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    class FakeSession:
+        def get(self, url, **kwargs):
+            return FakeResponse()
+
+    client = KiwiGridHEMSClient(session=FakeSession(), access_token="test-token")
+    with pytest.raises(hems_client.KiwiGridHEMSNotFoundError):
+        asyncio.run(client._async_get_json("/device", where="GET /v12/device"))
+
+
 
 @pytest.mark.parametrize("mode", ["PV_EXCESS", "DEPARTURE_TIME"])
 def test_reset_uses_device_defaults_and_preserves_active_mode(mode):

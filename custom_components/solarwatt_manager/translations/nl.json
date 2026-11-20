@@ -668,6 +668,15 @@
         }
       }
     },
+    "text": {
+      "schedule_monday": {"name": "Schema maandag"},
+      "schedule_tuesday": {"name": "Schema dinsdag"},
+      "schedule_wednesday": {"name": "Schema woensdag"},
+      "schedule_thursday": {"name": "Schema donderdag"},
+      "schedule_friday": {"name": "Schema vrijdag"},
+      "schedule_saturday": {"name": "Schema zaterdag"},
+      "schedule_sunday": {"name": "Schema zondag"}
+    },
     "button": {
       "optimization_config_reset": {
         "name": "Optimalisatie-instellingen herstellen"
@@ -683,6 +692,9 @@
       },
       "schedule_set": {
         "name": "Schema verzenden"
+      },
+      "schedule_fields_clear": {
+        "name": "Dagvelden wissen"
       }
     },
     "switch": {

@@ -24,10 +24,12 @@ from .entity_helpers import (
     has_optimization_defaults,
     build_thing_schedule_refresh_unique_id,
     build_thing_schedule_set_unique_id,
+    build_thing_schedule_fields_clear_unique_id,
     is_hems_battery_thing,
     is_hems_switchable_thing,
     setup_hems_control_entities,
 )
+from .schedule_fields import WEEKDAYS, day_inputs_to_schedule, schedule_to_day_inputs
 
 
 async def async_setup_entry(
@@ -54,6 +56,12 @@ async def async_setup_entry(
     setup_hems_control_entities(
         entry, async_add_entities, is_hems_battery_thing,
         lambda uid, thing, device_id, selected: SOLARWATTScheduleSetButton(
+            entry.runtime_data, entry.entry_id, uid, thing, device_id, selected,
+        ),
+    )
+    setup_hems_control_entities(
+        entry, async_add_entities, is_hems_battery_thing,
+        lambda uid, thing, device_id, selected: SOLARWATTScheduleFieldsClearButton(
             entry.runtime_data, entry.entry_id, uid, thing, device_id, selected,
         ),
     )
@@ -168,12 +176,44 @@ class SOLARWATTScheduleSetButton(CoordinatorEntity, ButtonEntity):
         if schedule is None:
             raise HomeAssistantError("Get the schedule before sending it")
         try:
+            day_inputs = getattr(self.coordinator, "hems_schedule_day_inputs", {}).get(
+                self._device_id,
+                schedule_to_day_inputs(schedule),
+            )
+            edited_schedule = day_inputs_to_schedule(day_inputs)
             await self.coordinator.async_set_hems_device_schedule(
                 self._device_id,
-                schedule,
+                edited_schedule,
             )
         except Exception as err:
             raise HomeAssistantError(f"Unable to set KiwiGrid HEMS schedule: {err}") from err
+
+
+class SOLARWATTScheduleFieldsClearButton(CoordinatorEntity, ButtonEntity):
+    _attr_has_entity_name = True
+    _attr_translation_key = "schedule_fields_clear"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:playlist-remove"
+
+    def __init__(self, coordinator, entry_id, thing_uid, thing, device_id, selected):
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._attr_unique_id = build_thing_schedule_fields_clear_unique_id(entry_id, thing_uid)
+        self._attr_device_info = build_thing_device_info(
+            coordinator.hass,
+            get_device_registry_anchor(coordinator.entry),
+            thing,
+            coordinator.things,
+            selected,
+            str(coordinator.client.host or ""),
+            config_entry_id=entry_id,
+        )
+
+    async def async_press(self) -> None:
+        self.coordinator.hems_schedule_day_inputs[self._device_id] = {
+            day: "" for day in WEEKDAYS
+        }
+        self.coordinator.async_update_listeners()
 
 
 class SOLARWATTOverrideResetButton(CoordinatorEntity, ButtonEntity):

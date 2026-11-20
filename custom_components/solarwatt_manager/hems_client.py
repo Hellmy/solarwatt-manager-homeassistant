@@ -136,6 +136,10 @@ class KiwiGridHEMSProtocolError(KiwiGridHEMSError):
     """Unexpected API response."""
 
 
+class KiwiGridHEMSNotFoundError(KiwiGridHEMSProtocolError):
+    """Requested HEMS resource does not exist."""
+
+
 def _raise_for_login_http_error(status: int, *, where: str) -> None:
     """Classify login HTTP failures as authentication or connection errors."""
     if status < 400:
@@ -440,7 +444,7 @@ class KiwiGridHEMSClient:
                         )
 
                     if resp.status == 404:
-                        raise KiwiGridHEMSProtocolError(
+                        raise KiwiGridHEMSNotFoundError(
                             f"HEMS endpoint not found while requesting {where}"
                         )
 
@@ -697,10 +701,13 @@ class KiwiGridHEMSClient:
         safe_device_id = quote(str(device_id or "").strip(), safe="")
         if not safe_device_id:
             raise KiwiGridHEMSProtocolError("KiwiGrid HEMS device id is missing")
-        return await self._async_get_json(
-            f"/device/{safe_device_id}/schedule",
-            where="GET /v12/device/{id}/schedule",
-        )
+        try:
+            return await self._async_get_json(
+                f"/device/{safe_device_id}/schedule",
+                where="GET /v12/device/{id}/schedule",
+            )
+        except KiwiGridHEMSNotFoundError:
+            return {}
 
     async def async_set_device_schedule(
         self, device_id: str, schedule: Any

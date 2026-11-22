@@ -1,0 +1,40 @@
+{
+  "name": "SOLARWATT Manager and Home Assistant Core",
+  "initializeCommand": "bash ${localWorkspaceFolder}/.devcontainer/initialize.sh",
+  "build": {
+    "dockerfile": "../../home-assistant-core/Dockerfile.dev",
+    "context": "../../home-assistant-core"
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/../home-assistant-core,target=/workspaces/home-assistant-core,type=bind,consistency=cached"
+  ],
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postStartCommand": "cd /workspaces/home-assistant-core && script/bootstrap",
+  "containerEnv": {
+    "PYTHONASYNCIODEBUG": "1"
+  },
+  "forwardPorts": [8123],
+  "runArgs": [
+    "--security-opt",
+    "label=disable"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
+        "python.terminal.activateEnvInCurrentTerminal": true,
+        "python.testing.pytestEnabled": true,
+        "editor.formatOnSave": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        }
+      }
+    }
+  }
+}

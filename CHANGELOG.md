@@ -9,6 +9,7 @@
 
 ### ✨ Features
 
+- Name the separate integration **SOLARWATT Manager (Hellmy)** in Home Assistant to distinguish it from the standard integration.
 - Add the advertised Dynamic tariff optimization mode and capability-driven controls for tariff hours per day, charging energy (kWh converted to Wh), and target battery SoC. Reuse existing polling, devices and configuration-write serialization.
 - Reset advertised defaults for the active tariff mode while preserving the mode and schedules. Send tariff and departure fields only in their respective modes.
 

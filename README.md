@@ -82,6 +82,12 @@ config/custom_components/
 
 3. Restart Home Assistant
 
+To install the `solarwatt_hellmy` integration independently, copy only
+`custom_components/solarwatt_hellmy` instead. It uses its own Home Assistant
+domain and appears as **SOLARWATT Manager Hellmy** when adding an integration.
+Avoid installing both integrations unless you intentionally want separate,
+duplicate entities and polling.
+
 ---
 
 ## ⚙️ Configuration

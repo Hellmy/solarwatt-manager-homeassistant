@@ -1,0 +1,307 @@
+from __future__ import annotations
+
+from collections import Counter
+from collections.abc import Mapping
+from datetime import datetime, timezone
+import re
+from typing import Any
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+
+from .const import (
+    CONF_ENERGY_DELTA_KWH,
+    DEFAULT_ENERGY_DELTA_KWH,
+    DOMAIN,
+    SOLARWATTConfigEntry,
+    get_device_registry_anchor,
+)
+from .registry import get_device_by_identifier
+
+
+_PRIVATE_TEXT = re.compile(
+    r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}"
+    r"|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"|(?<![0-9a-f])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f])"
+    r"|(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)"
+    r"|(?<![0-9a-f:])(?:[0-9a-f]{0,4}:){2,}[0-9a-f:.]*(?:%[\w.-]+)?"
+    r"|https?://[^\s]+",
+    re.IGNORECASE,
+)
+
+
+def _redact(obj: Any, *, key: str = "") -> Any:
+    """Redact private fields, free text, and identifying dictionary keys."""
+    normalized_key = re.sub(r"[^a-z0-9]", "", key.lower())
+    if normalized_key in {"swversion", "kiwiosedgeversion", "emsetupfeatureversion"}:
+        if isinstance(obj, str) and re.fullmatch(r"\d+(?:\.\d+)+", obj):
+            return obj
+    if normalized_key in {
+        "id", "uid", "uuid", "mac", "ip", "ipv4", "ipv6", "lat", "lon", "lng",
+        "user", "login", "account", "credentials", "auth", "position", "geo",
+        "entryid", "deviceid", "bridgeuid", "uniqueid", "installationid",
+        "enabledthings", "name", "label", "title", "generatedlabel",
+        "lasterror", "partialerrors", "lastexception", "statusdetail",
+    } or any(
+        part in normalized_key
+        for part in (
+            "username", "password", "token", "cookie", "authorization", "session",
+            "secret", "apikey", "identifier", "serial", "host", "address", "email",
+            "location", "latitude", "longitude", "coordinates", "gps",
+            "description", "comment", "message", "note",
+        )
+    ) or (
+        normalized_key.endswith(("uid", "deviceid", "entryid", "userid", "name", "label", "title"))
+        and normalized_key != "thingtypeuid"
+    ):
+        return None if obj is None else "REDACTED"
+    if normalized_key in {"rawstate", "parsedvalue"} and isinstance(obj, str):
+        # String sensor values may themselves be names, credentials, or locations.
+        return obj if re.fullmatch(r"[-+]?\d+(?:\.\d+)?(?:\s*[WkVAhHz%°C]+)?", obj) else "REDACTED"
+    if isinstance(obj, Mapping):
+        out: dict[str, Any] = {}
+        prefix = {
+            "things_compact": "thing",
+            "data_items_compact": "item",
+            "energy_sensors_last_write": "entity",
+        }.get(key)
+        for index, (k, v) in enumerate(obj.items(), 1):
+            field = str(k)
+            if re.sub(r"[^a-z0-9]", "", field.lower()) in {"serial", "serialnumber"}:
+                continue
+            output_key = f"{prefix}_{index}" if prefix else field
+            if _PRIVATE_TEXT.search(output_key):
+                output_key = f"field_{index}"
+            if field in {"raw_state", "parsed_value"} and not str(obj.get("type") or "").startswith("Number"):
+                out[output_key] = None if v is None else "REDACTED"
+                continue
+            out[output_key] = _redact(v, key="" if prefix in {"thing", "entity"} else field)
+        return out
+    if isinstance(obj, (list, tuple, set)):
+        return [_redact(v) for v in obj]
+    if isinstance(obj, str):
+        return _PRIVATE_TEXT.sub("REDACTED", obj)
+    return obj
+
+
+def _item_payload(item: Any) -> dict[str, Any]:
+    """Build a compact diagnostics payload for a SOLARWATTItem."""
+    parsed = getattr(item, "parsed", None)
+    raw = getattr(item, "raw", None)
+    pattern = None
+    if isinstance(raw, dict):
+        pattern = (raw.get("stateDescription") or {}).get("pattern")
+    return {
+        "type": getattr(item, "oh_type", None),
+        "label": getattr(item, "label", None),
+        "category": getattr(item, "category", None),
+        "editable": getattr(item, "editable", None),
+        "raw_state": raw.get("state") if isinstance(raw, dict) else None,
+        "state_pattern": pattern,
+        "parsed_value": getattr(parsed, "value", None),
+        "unit": getattr(parsed, "unit", None),
+        "timestamp_ms": getattr(parsed, "timestamp_ms", None),
+    }
+
+
+def _editable_count_key(editable: Any) -> str:
+    """Return the diagnostics bucket name for one editable flag."""
+    if editable is True:
+        return "true"
+    if editable is False:
+        return "false"
+    return "unknown"
+
+
+def _problem_item_issue(item_name: str, payload: dict[str, Any]) -> str | None:
+    """Return the most relevant diagnostics issue for one item payload."""
+    value = payload.get("parsed_value")
+    if value is None:
+        return "value is NULL"
+    if not isinstance(value, (int, float)):
+        return "non-numeric value"
+    unit = payload.get("unit")
+    if unit in (None, "", "N") and any(token in item_name for token in ("power", "work", "energy")):
+        return "missing unit"
+    return None
+
+
+def _energy_sensor_write(state) -> dict[str, Any] | None:
+    """Return the diagnostics snapshot for one energy sensor state."""
+    attrs = state.attributes or {}
+    device_class = attrs.get("device_class")
+    state_class = attrs.get("state_class")
+    if device_class != "energy" and state_class not in ("total", "total_increasing"):
+        return None
+    return {
+        "name": state.name,
+        "device_class": device_class,
+        "state_class": state_class,
+        "unit": attrs.get("unit_of_measurement"),
+        "last_updated": state.last_updated.isoformat() if state.last_updated else None,
+        "last_changed": state.last_changed.isoformat() if state.last_changed else None,
+    }
+
+
+def _collect_item_diagnostics(items: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """Collect compact item payloads, aggregate stats, and problem candidates."""
+    item_payloads: dict[str, Any] = {}
+    type_counts: Counter[str] = Counter()
+    category_counts: Counter[str] = Counter()
+    unit_counts: Counter[str] = Counter()
+    editable_counts: Counter[str] = Counter()
+    problem_items: list[dict[str, Any]] = []
+    numeric_count = 0
+    missing_label_count = 0
+    null_value_count = 0
+    non_numeric_count = 0
+
+    for item_name, item in items.items():
+        clean_name = (item_name or "").lstrip("#")
+        payload = _item_payload(item)
+        value = payload.get("parsed_value")
+        item_payloads[clean_name] = payload
+
+        if isinstance(value, (int, float)):
+            numeric_count += 1
+        elif value is None:
+            null_value_count += 1
+        else:
+            non_numeric_count += 1
+
+        type_counts[payload.get("type") or "unknown"] += 1
+        category_counts[payload.get("category") or "unknown"] += 1
+        unit_counts[payload.get("unit") or "none"] += 1
+        editable_counts[_editable_count_key(payload.get("editable"))] += 1
+
+        if not payload.get("label"):
+            missing_label_count += 1
+        if issue := _problem_item_issue(clean_name, payload):
+            problem_items.append({"item": f"item_{len(item_payloads)}", "issue": issue})
+
+    return (
+        item_payloads,
+        {
+            "numeric_items": numeric_count,
+            "types": dict(type_counts),
+            "categories": dict(category_counts),
+            "units": dict(unit_counts),
+            "editable": dict(editable_counts),
+            "missing_label": missing_label_count,
+            "null_value": null_value_count,
+            "non_numeric_value": non_numeric_count,
+        },
+        problem_items,
+    )
+
+
+def _hems_status_payload(coordinator: Any) -> dict[str, Any]:
+    """Return the latest partial-update status for KiwiGrid HEMS."""
+    last_success = getattr(coordinator, "hems_last_success", None)
+    return {
+        "last_success": (
+            datetime.fromtimestamp(last_success, timezone.utc).isoformat()
+            if isinstance(last_success, (int, float))
+            else None
+        ),
+        "last_error": getattr(coordinator, "hems_last_error", None),
+        "partial_errors": list(getattr(coordinator, "hems_partial_errors", ()) or ()),
+        "cache_age_seconds": getattr(coordinator, "hems_cache_age_seconds", None),
+    }
+
+
+async def async_get_config_entry_diagnostics(
+    hass: HomeAssistant, entry: SOLARWATTConfigEntry
+) -> dict[str, Any]:
+    """Return diagnostics for a config entry.
+
+    No additional network calls are performed. This is a snapshot of the latest coordinator data.
+    """
+    coordinator = entry.runtime_data
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+
+    device_anchor = get_device_registry_anchor(entry)
+    dev = get_device_by_identifier(dev_reg, (DOMAIN, device_anchor), entry.entry_id)
+    device = (
+        {
+            "name": dev.name,
+            "manufacturer": dev.manufacturer,
+            "model": dev.model,
+            "sw_version": dev.sw_version,
+            "hw_version": dev.hw_version,
+        }
+        if dev
+        else None
+    )
+
+    items = coordinator.data or {}
+    interval = getattr(coordinator, "update_interval", None)
+    update_interval_seconds = int(interval.total_seconds()) if interval else None
+    energy_delta_kwh = entry.options.get(CONF_ENERGY_DELTA_KWH, DEFAULT_ENERGY_DELTA_KWH)
+
+    energy_sensor_writes = {
+        registry_entry.entity_id: sensor_write
+        for registry_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+        if (state := hass.states.get(registry_entry.entity_id)) is not None
+        if (sensor_write := _energy_sensor_write(state)) is not None
+    }
+    item_payloads, item_stats, problem_items = _collect_item_diagnostics(items)
+
+    things = getattr(coordinator, "things", None) or {}
+    things_compact: dict[str, Any] = {}
+    for uid, thing in things.items():
+        status_info = thing.get("statusInfo")
+        if not isinstance(status_info, dict):
+            status_info = {}
+        things_compact[uid] = {
+            "label": thing.get("label"),
+            "thing_type_uid": thing.get("thingTypeUID") or thing.get("thingTypeUid"),
+            "bridge_uid": thing.get("bridgeUID") or thing.get("bridgeUid"),
+            "status": status_info.get("status"),
+            "status_detail": status_info.get("statusDetail"),
+            "properties": thing.get("properties"),
+            "channels_count": len(thing.get("channels") or []),
+        }
+
+    data: dict[str, Any] = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "entry": {
+            "entry_id": entry.entry_id,
+            "title": entry.title,
+            "domain": entry.domain,
+            "data": dict(entry.data),
+            "options": dict(entry.options),
+        },
+        "device": device,
+        "coordinator": {
+            "last_update_success": getattr(coordinator, "last_update_success", None),
+            "update_interval_seconds": update_interval_seconds,
+            "data_items": len(items),
+            "numeric_items": item_stats["numeric_items"],
+            "last_exception": repr(getattr(coordinator, "last_exception", None)) if getattr(coordinator, "last_exception", None) else None,
+        },
+        "kiwigrid_hems": _hems_status_payload(coordinator),
+        "gateway_info": {
+            key: value
+            for key, value in (getattr(coordinator, "gateway_info", {}) or {}).items()
+            if key in {"kiwiOsEdgeVersion", "emSetupFeatureVersion"}
+        },
+        "energy_settings": {
+            "energy_delta_kwh": energy_delta_kwh,
+            "energy_sensors_last_write": energy_sensor_writes,
+        },
+        "data_stats": {key: value for key, value in item_stats.items() if key != "numeric_items"},
+        "data_items_compact": item_payloads,
+        "problem_items": {
+            "problem_items_top_20": problem_items[:20],
+            "problem_items_total": len(problem_items),
+        },
+        "things": {
+            "things_count": len(things_compact),
+            "things_compact": things_compact,
+        },
+    }
+
+    return _redact(data)

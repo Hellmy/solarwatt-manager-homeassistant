@@ -1,0 +1,22 @@
+{
+  "domain": "solarwatt_hellmy",
+  "name": "SOLARWATT Manager Hellmy",
+  "categories": [
+    "energy.solar_batteries",
+    "energy.meters_monitoring"
+  ],
+  "codeowners": [
+    "@thokaro"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/thokaro/solarwatt-manager-homeassistant",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/thokaro/solarwatt-manager-homeassistant/issues",
+  "loggers": [
+    "custom_components.solarwatt_hellmy"
+  ],
+  "quality_scale": "custom",
+  "requirements": [],
+  "version": "2026.11.2"
+}

@@ -1,0 +1,265 @@
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping, Iterable
+from functools import lru_cache
+
+# -----------------------------
+# Name normalization (display + entity_id friendliness)
+# -----------------------------
+# Current normalization removes technical prefixes entirely.
+CONDITIONAL_ID_RULES = [
+    r"^kiwigrid_location_standard_([^_]+)_harmonized_",
+    r"^pvplant_standard_([^_]+)_", 
+    r"^foxesshybrid_battery_([^_]+)_",
+    r"^foxesshybrid_inverter_([^_]+)_",
+    r"^foxesshybrid_meter_([^_]+)_",
+    r"^keba_wallbox_([^_]+)_",    
+    r"^mystrom_switch_([^_]+)_",
+    r"^modbus_sunspec_sma_inverter_([^_]+)_",
+    r"^modbus_sunspec_fronius_inverter_([^_]+)_",
+    r"^myreserveethernet_myreserve_([^_]+)_",
+    r"^myreserveethernet_acs_([^_]+)_(?:0_)?",
+    r"^kgshelly_gen2switch_([^_]+)_(?:0_)?",
+    # Strip the BatteryFlex device id and optional group prefix.
+    r"^batteryflex_battery_([^_]+)_(?:harmonized_|batteryChannelGroup_)?",
+    r"^solarwattBattery_batteryflex_BatteryFlex_([^_]+)_(?:harmonized_|batteryChannelGroup_)?",
+    # Drop the variable KACO device segment but keep the functional suffix block.
+    r"^sunspecnext_inverter_KACO_.*?_(?=(?:harmonized_|inverter_|limitable_|pv_power_production_))",
+]
+
+
+STATIC_NORMALIZATION_RULES: list[tuple[str, str]] = [
+    (r"(^|_)battery_battery_", r"\1battery_"),
+]
+
+SPECIAL_DISPLAY_NAMES: dict[str, str] = {
+    "gridPower": "Grid Power",
+    "batteryPower": "Battery Power",
+    "selfConsumedPower": "Self Consumed Power",
+    "householdFromBatteryPower": "Household From Battery Power",
+    "householdFromGridPower": "Household From Grid Power",
+    "householdFromPvPower": "Household From PV Power",
+    "batterySoc": "Battery SoC",
+}
+
+_DISPLAY_ACRONYMS = {
+    "ev": "EV",
+    "pv": "PV",
+    "soc": "SoC",
+}
+_DISPLAY_ACRONYM_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?P<acronym>ev|pv|soc)(?P<digits>\d*)(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+
+
+@lru_cache(maxsize=1)
+def _compiled_conditional_id_rules() -> list[re.Pattern[str]]:
+    return [re.compile(pattern) for pattern in CONDITIONAL_ID_RULES]
+
+@lru_cache(maxsize=1)
+def _compiled_static_normalization_rules() -> list[tuple[re.Pattern[str], str]]:
+    return [(re.compile(pattern), repl) for pattern, repl in STATIC_NORMALIZATION_RULES]
+
+
+
+_HEMS_ITEM_RE = re.compile(
+    r"^hems_(?P<kind>battery|pv_plant|evstation|plug|smart_heater|device|flow|analytics_consumption|analytics_production|analytics_storage|analytics_independence|analytics_finance)_"
+    r"(?:(?P<id>[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}|v11)_)?"
+    r"(?P<suffix>.+)$",
+    re.IGNORECASE,
+)
+
+
+def _hems_item_match(raw: str) -> re.Match[str] | None:
+    """Return parsed KiwiGrid HEMS item metadata."""
+    return _HEMS_ITEM_RE.match(clean_item_key(raw))
+
+
+def hems_item_suffix(raw: str) -> str | None:
+    """Return the functional suffix for a KiwiGrid HEMS item name."""
+    match = _hems_item_match(raw)
+    if not match:
+        return None
+    return match.group("suffix")
+
+
+def is_hems_item_name(raw: str) -> bool:
+    """Return True for item names generated from the KiwiGrid HEMS API."""
+    return hems_item_suffix(raw) is not None
+
+
+def clean_item_key(raw: str) -> str:
+    """Strip OpenHAB leading '#' used for metadata items."""
+    return (raw or "").lstrip("#")
+
+
+def _normalize_static_item_name(name: str) -> str:
+    for pattern, repl in _compiled_static_normalization_rules():
+        name = pattern.sub(repl, name)
+    return name
+
+
+def normalize_item_name(
+    raw: str,
+) -> str:
+    """Normalize item names using conditional and static normalization rules."""
+    name = clean_item_key(raw)
+
+    for pattern in _compiled_conditional_id_rules():
+        name = pattern.sub("", name)
+
+    return _normalize_static_item_name(name)
+
+
+def item_entity_name(
+    raw: str,
+) -> str:
+    """Return the user-facing entity name derived from one raw item key."""
+    if hems_suffix := hems_item_suffix(raw):
+        base_name = hems_suffix
+    else:
+        clean_item_name = normalize_item_name(raw)
+        if clean_item_name in SPECIAL_DISPLAY_NAMES:
+            return SPECIAL_DISPLAY_NAMES[clean_item_name]
+        base_name = clean_item_name.replace("harmonized_", "")
+
+    base_name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", base_name)
+    base_name = base_name.replace("_", " ").strip()
+    return format_display_name(base_name)
+
+
+def normalize_display_acronyms(name: str) -> str:
+    """Normalize known acronyms without changing other display-name casing."""
+    return _DISPLAY_ACRONYM_RE.sub(
+        lambda match: (
+            f"{_DISPLAY_ACRONYMS[match.group('acronym').lower()]}"
+            f"{match.group('digits')}"
+        ),
+        name,
+    )
+
+
+def item_display_name(raw: str, label: str | None = None) -> str:
+    """Return an item label with consistent acronym casing."""
+    clean_label = str(label or "").strip()
+    if clean_label:
+        return normalize_display_acronyms(clean_label)
+    return item_entity_name(raw)
+
+
+def slugify_entity_name(name: str) -> str:
+    """Return a Home Assistant friendly object-id fragment."""
+    slug = re.sub(r"[^a-z0-9]+", "_", (name or "").strip().lower())
+    slug = re.sub(r"_+", "_", slug)
+    return slug.strip("_")
+
+
+def _slug_tokens(name: str) -> list[str]:
+    """Return non-empty slug tokens for display or object-id text."""
+    return [token for token in slugify_entity_name(name).split("_") if token]
+
+
+def _join_slug_tokens(tokens: list[str]) -> str:
+    """Join slug tokens into one Home Assistant object-id fragment."""
+    return "_".join(token for token in tokens if token)
+
+
+def trim_device_tokens(entity_name: str, device_name: str) -> str:
+    """Remove a duplicated device prefix or overlap from an entity/object name."""
+    entity_tokens = _slug_tokens(entity_name)
+    device_tokens = _slug_tokens(device_name)
+
+    if not entity_tokens or not device_tokens:
+        return _join_slug_tokens(entity_tokens)
+
+    if entity_tokens[: len(device_tokens)] == device_tokens:
+        entity_tokens = entity_tokens[len(device_tokens):]
+
+    max_overlap = min(len(device_tokens), len(entity_tokens))
+    for overlap in range(max_overlap, 0, -1):
+        if entity_tokens[:overlap] == device_tokens[-overlap:]:
+            entity_tokens = entity_tokens[overlap:]
+            break
+
+    return _join_slug_tokens(entity_tokens)
+
+
+def format_display_name(name: str) -> str:
+    """Format a human-friendly display name (Title Case with exceptions)."""
+    if not name:
+        return name
+
+    def _format_token(token: str) -> str:
+        if not token:
+            return token
+        if token.isdigit():
+            return token
+
+        lower = token.lower()
+        for key, replacement in (
+            ("bms", "BMS"),
+            ("soc", "SoC"),
+            ("soh", "SoH"),
+            ("ac", "AC"),
+            ("dc", "DC"),
+            ("ev", "EV"),
+            ("pv", "PV"),
+            ("mppt", "MPPT"),
+            ("acs", "ACS"),
+            ("sma", "SMA"),
+            ("fronius", "Fronius"),
+            ("keba", "KEBA"),
+            ("sunspec", "SunSpec"),
+            ("inv", "INV"),
+            ("modbus", "Modbus"),
+            ("foxess", "FoxESS"),
+            ("foxessinv", "FoxESSInv"),
+            ("mystrom", "myStrom"),
+        ):
+            if lower == key or (lower.startswith(key) and lower[len(key):].isdigit()):
+                return replacement + token[len(key):]
+
+        if token != token.lower():
+            return token
+
+        return token.capitalize()
+
+    parts = re.split(r"([^A-Za-z0-9]+)", name)
+    return "".join(_format_token(part) if idx % 2 == 0 else part for idx, part in enumerate(parts))
+
+
+@lru_cache(maxsize=4)
+def _sensor_label_pattern(keys: tuple[str, ...]) -> re.Pattern[str]:
+    words = sorted((key.removeprefix("label_").replace("_", " ") for key in keys), key=len, reverse=True)
+    return re.compile(r"(?<![\w])(?:" + "|".join(re.escape(word) for word in words) + r")(?![\w])", re.IGNORECASE)
+
+
+def localized_sensor_name(
+    name: str, translations: Mapping[str, str], device_names: Iterable[str] = (),
+) -> str:
+    """Translate known sensor terminology while preserving API device names."""
+    keys = tuple(sorted(key for key in translations if key.startswith("label_")))
+    if not keys:
+        return name
+    protected: list[str] = []
+    for device in sorted(set(device_names), key=len, reverse=True):
+        if not device:
+            continue
+        # Flow labels use title-cased device slugs; analytics retain API names.
+        for variant in dict.fromkeys((device, slugify_entity_name(device).replace("_", " "), item_entity_name(device))):
+            if not variant:
+                continue
+            pattern = re.compile(r"(?<!\w)" + re.escape(variant) + r"(?!\w)", re.IGNORECASE)
+            def protect(match: re.Match[str]) -> str:
+                protected.append(match.group())
+                return f"\x00{len(protected)-1}\x00"
+            name = pattern.sub(protect, name)
+    name = name.replace("_", " ")
+    translated = _sensor_label_pattern(keys).sub(
+        lambda match: translations["label_" + match.group().lower().replace(" ", "_")], name,
+    )
+    for index, original in enumerate(protected):
+        translated = translated.replace(f"\x00{index}\x00", original)
+    return translated
